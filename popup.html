@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Moegal Honyaku</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="panel">
+    <header class="hero">
+      <p class="badge">Moegal Honyaku</p>
+      <h1>翻译配置</h1>
+      <p class="hero-text">切换翻译供应商与模式</p>
+    </header>
+
+    <section class="form-card api-card">
+      <label class="field" for="api-base-input">
+        <span class="field-label">API 服务器地址</span>
+        <input class="field-input" id="api-base-input" type="text" placeholder="http://127.0.0.1:8000">
+      </label>
+      <div class="api-actions">
+        <button type="button" id="save-api-button" class="ghost-btn">保存地址</button>
+      </div>
+      <p class="api-tip" id="api-tip">默认: http://127.0.0.1:8000</p>
+    </section>
+
+    <section class="form-card">
+      <label class="field" for="provider-select">
+        <span class="field-label">翻译供应商</span>
+        <select class="field-input" id="provider-select"></select>
+      </label>
+      <label class="field" for="mode-select">
+        <span class="field-label">翻译模式</span>
+        <select class="field-input" id="mode-select"></select>
+      </label>
+      <p class="mode-tip" id="mode-tip">parallel：逐句并发翻译，适合长文本分段处理。</p>
+      <p class="error-tip" id="error-tip" hidden></p>
+    </section>
+
+    <section class="toggle-card">
+      <div class="toggle-item">
+        <div class="toggle-info">
+          <span class="toggle-label">自动翻译</span>
+          <span class="toggle-desc">开启后页面图片将自动翻译</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="auto-translate-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="toggle-item">
+        <div class="toggle-info">
+          <span class="toggle-label">自动保存图片</span>
+          <span class="toggle-desc">翻译后自动下载翻译结果图片</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="auto-save-image-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="toggle-item">
+        <div class="toggle-info">
+          <span class="toggle-label">Base64上传</span>
+          <span class="toggle-desc">开启后图片转base64上传，服务器无需下载</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="base64-upload-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </section>
+
+    <section class="conf-card" aria-live="polite">
+      <div class="conf-item">
+        <span class="label">当前翻译服务</span>
+        <span class="value" id="current-engine">OpenAI</span>
+      </div>
+      <div class="conf-item">
+        <span class="label">当前翻译模式</span>
+        <span class="value" id="current-mode">parallel</span>
+      </div>
+      <div class="conf-item">
+        <span class="label">同步状态</span>
+        <span class="status is-idle" id="sync-status">就绪</span>
+      </div>
+      <div class="conf-item">
+        <span class="label">最近同步时间</span>
+        <span class="value value-secondary" id="last-sync">未同步</span>
+      </div>
+    </section>
+
+    <section class="bg-card" aria-live="polite">
+      <label class="field" for="bg-file-input">
+        <span class="field-label">自定义背景</span>
+        <input class="field-input file-input" id="bg-file-input" type="file" accept="image/*">
+      </label>
+      <div class="bg-actions">
+        <button type="button" id="clear-bg-button" class="ghost-btn">清除背景</button>
+      </div>
+      <p class="bg-tip" id="bg-tip">未设置背景</p>
+    </section>
+
+    <button type="button" id="reload-conf-button" class="sync-btn">重新拉取配置</button>
+  </main>
+
+  <section class="cropper-overlay" id="bg-cropper-overlay" hidden>
+    <div class="cropper-dialog" role="dialog" aria-modal="true" aria-labelledby="bg-cropper-title">
+      <h2 id="bg-cropper-title">裁剪背景</h2>
+      <p class="cropper-desc" id="bg-cropper-desc">裁剪比例与 popup 大小一致。</p>
+      <div class="cropper-viewport" id="bg-cropper-viewport">
+        <canvas id="bg-cropper-canvas"></canvas>
+      </div>
+      <label class="field cropper-zoom-field" for="bg-cropper-zoom">
+        <span class="field-label">缩放</span>
+        <input class="cropper-zoom" id="bg-cropper-zoom" type="range" min="0" max="1000" value="0">
+      </label>
+      <div class="cropper-actions">
+        <button type="button" id="bg-cropper-cancel" class="ghost-btn">取消</button>
+        <button type="button" id="bg-cropper-confirm" class="sync-btn cropper-confirm-btn">应用裁剪</button>
+      </div>
+    </div>
+  </section>
+
+  <script src="popup.js"></script>
+</body>
+</html>

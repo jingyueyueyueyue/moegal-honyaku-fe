@@ -1,0 +1,35 @@
+{
+    "manifest_version": 3,
+    "name": "Moegal Honyaku FE",
+    "version": "1.0",
+    "description": "This is the frontend script of the Moegal Honyaku project.",
+    "permissions": ["scripting", "activeTab", "storage"],
+    "host_permissions": ["<all_urls>"],
+    "background": {
+      "service_worker": "background.js"
+    },
+    "content_scripts": [
+      {
+        "matches": ["<all_urls>"],
+        "js": ["content.js"],
+        "css": ["inject.css"]
+      }
+    ],
+    "action": {
+      "default_title": "Moegal Honyaku",
+      "default_popup": "popup.html",
+      "default_icon": {
+        "16": "icon-256.png",
+        "32": "icon-256.png",
+        "48": "icon-256.png",
+        "128": "icon-256.png"
+      }
+    },
+    "icons": {
+      "16": "icon-256.png",
+      "32": "icon-256.png",
+      "48": "icon-256.png",
+      "128": "icon-256.png"
+    }
+  }
+  
