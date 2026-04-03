@@ -262,7 +262,8 @@ async function getImageBase64(img) {
     try {
         const response = await chrome.runtime.sendMessage({
             type: "FETCH_IMAGE",
-            url: src
+            url: src,
+            referer: window.location.href
         })
         if (response.error) {
             throw new Error(response.error)
