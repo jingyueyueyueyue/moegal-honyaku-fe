@@ -2,7 +2,10 @@
 
 一个给网页漫画图一键翻译的浏览器插件。
 
-<img src="./example.png" style="zoom: 55%;" />
+
+
+<img width="495" height="925" alt="613496c0ff7981e35317688c8b996a08" src="https://github.com/user-attachments/assets/f57c24b8-1992-4698-a2c1-bcdb0c0d3bf8" />
+
 
 ## 这个插件能做什么
 
