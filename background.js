@@ -26,7 +26,43 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch((error) => sendResponse({ error: error.message }))
     return true // Keep the message channel open for async response
   }
+  
+  if (message.type === "TRANSLATE_REQUEST") {
+    fetchTranslateApi(message.url, message.payload)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ error: error.message }))
+    return true // Keep the message channel open for async response
+  }
 })
+
+// 通过 Service Worker 代理翻译请求，绕过混合内容限制
+async function fetchTranslateApi(url, payload) {
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    })
+    
+    let result = null
+    try {
+      result = await response.json()
+    } catch (e) {
+      // JSON 解析失败
+    }
+    
+    if (!response.ok) {
+      const errorMsg = result?.detail || result?.info || result?.message || `请求失败 (${response.status})`
+      return { error: errorMsg }
+    }
+    
+    return { success: true, data: result }
+  } catch (error) {
+    return { error: error.message }
+  }
+}
 
 async function fetchImageAsBase64(url, referer) {
   // 检查是否是 Pixiv 图片

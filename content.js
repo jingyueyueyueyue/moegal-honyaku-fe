@@ -216,19 +216,10 @@ function buildRefererBaseUrl() {
     return `${window.location.protocol}//${window.location.hostname}`
 }
 
-function parseResponseError(result, response) {
-    return (
-        result?.detail ||
-        result?.info ||
-        result?.message ||
-        `请求失败 (${response.status})`
-    )
-}
-
 function logTranslateResult(result) {
     if (!result) return
     console.log("-------------------------------------")
-    console.log(`耗时：${result.duration}，花费${result.price}`)
+    console.log(`耗时：${result.duration}，花费：${result.price}`)
     console.log(`原句：${result.raw_text}`)
     console.log(`翻译：${result.cn_text}`)
     console.log("-------------------------------------")
@@ -241,7 +232,7 @@ function isCanvasReadBlockedError(error) {
 
 function getCanvasImageBase64(canvas) {
     try {
-        return canvas.toDataURL("image/jpeg", 0.85)
+        return canvas.toDataURL("image/jpeg")
     } catch (error) {
         throw error instanceof Error ? error : new Error(String(error))
     }
@@ -253,12 +244,24 @@ async function getImageBase64(img) {
         throw new Error("图片地址为空")
     }
     
-    // 如果已经是 base64，直接返回
+    // 如果已经是 base64，需要转换为 JPEG 格式（后端只支持 png/jpeg/webp）
     if (src.startsWith("data:image")) {
-        return src
+        return new Promise((resolve, reject) => {
+            const tempImg = new Image()
+            tempImg.onload = () => {
+                const canvas = document.createElement("canvas")
+                canvas.width = tempImg.width
+                canvas.height = tempImg.height
+                const ctx = canvas.getContext("2d")
+                ctx.drawImage(tempImg, 0, 0)
+                resolve(canvas.toDataURL("image/jpeg", 0.85))
+            }
+            tempImg.onerror = () => reject(new Error("图片加载失败"))
+            tempImg.src = src
+        })
     }
     
-    // 尝试使用 background script 获取图片（绑过 CORS）
+    // 尝试使用 background script 获取图片（绑定 CORS）
     try {
         const response = await chrome.runtime.sendMessage({
             type: "FETCH_IMAGE",
@@ -275,7 +278,7 @@ async function getImageBase64(img) {
         console.warn("Background fetch failed:", bgError)
     }
     
-    // 如果 background script 失败，尝试直接 fetch
+    // 如果 background script 失败，尝试直�?fetch
     try {
         const response = await fetch(src, {
             mode: "cors",
@@ -459,26 +462,20 @@ function downloadTranslatedImage(translatedDataUrl, sourceUrl) {
 
 async function requestTranslation(surface) {
     const payload = await getTranslatePayload(surface)
-    const response = await fetch(TRANSLATE_API_URL, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "ngrok-skip-browser-warning": "true",
-        },
-        body: JSON.stringify(payload),
+    
+    // 通过 background.js 的 Service Worker 代理请求，绕过混合内容限制
+    const response = await chrome.runtime.sendMessage({
+        type: "TRANSLATE_REQUEST",
+        url: TRANSLATE_API_URL,
+        payload: payload
     })
-
-    let result = null
-    try {
-        result = await response.json()
-    } catch (error) {
-        result = null
+    
+    if (response.error) {
+        throw new Error(response.error)
     }
-
-    if (!response.ok) {
-        throw new Error(parseResponseError(result, response))
-    }
-
+    
+    const result = response.data
+    
     logTranslateResult(result)
 
     if (result?.status !== "success") {
