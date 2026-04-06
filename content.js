@@ -241,7 +241,7 @@ function isCanvasReadBlockedError(error) {
 
 function getCanvasImageBase64(canvas) {
     try {
-        return canvas.toDataURL("image/png")
+        return canvas.toDataURL("image/jpeg", 0.85)
     } catch (error) {
         throw error instanceof Error ? error : new Error(String(error))
     }
@@ -294,7 +294,7 @@ async function getImageBase64(img) {
                 canvas.height = tempImg.height
                 const ctx = canvas.getContext("2d")
                 ctx.drawImage(tempImg, 0, 0)
-                resolve(canvas.toDataURL("image/png"))
+                resolve(canvas.toDataURL("image/jpeg", 0.85))
             }
             tempImg.onerror = () => reject(new Error("图片加载失败"))
             tempImg.src = URL.createObjectURL(blob)
@@ -307,7 +307,7 @@ async function getImageBase64(img) {
             canvas.height = img.naturalHeight
             const ctx = canvas.getContext("2d")
             ctx.drawImage(img, 0, 0)
-            return canvas.toDataURL("image/png")
+            return canvas.toDataURL("image/jpeg", 0.85)
         } catch (canvasError) {
             throw new Error("无法获取图片数据，可能是跨域限制")
         }
@@ -435,14 +435,14 @@ function downloadTranslatedImage(translatedDataUrl, sourceUrl) {
         const link = document.createElement("a")
         link.href = translatedDataUrl
         // 从原图片URL提取文件名，或使用默认名
-        let filename = "translated_image.png"
+        let filename = "translated_image.jpg"
         if (sourceUrl) {
             try {
                 const urlPath = new URL(sourceUrl).pathname
                 const originalName = urlPath.split("/").pop()
                 if (originalName && originalName.includes(".")) {
                     const nameWithoutExt = originalName.replace(/\.[^.]+$/, "")
-                    filename = `${nameWithoutExt}_translated.png`
+                    filename = `${nameWithoutExt}_translated.jpg`
                 }
             } catch (e) {
                 // URL解析失败，使用默认文件名
@@ -560,7 +560,7 @@ function createTranslateButton(surface) {
 
         try {
             const result = await requestTranslation(surface)
-            const translatedDataUrl = "data:image/png;base64," + result.res_img
+            const translatedDataUrl = "data:image/jpeg;base64," + result.res_img
             applyTranslatedResult(surface, translatedDataUrl)
             // 自动保存图片
             if (autoSaveImageEnabled) {
@@ -672,7 +672,7 @@ async function processAutoTranslateQueue() {
 
         try {
             const result = await requestTranslation(surface)
-            const translatedDataUrl = "data:image/png;base64," + result.res_img
+            const translatedDataUrl = "data:image/jpeg;base64," + result.res_img
             applyTranslatedResult(surface, translatedDataUrl)
             translatedSurfaces.add(surface)
             // 自动保存图片

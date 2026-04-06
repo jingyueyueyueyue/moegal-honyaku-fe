@@ -89,13 +89,13 @@ async function fetchImageAsBase64(url, referer) {
     const ctx = canvas.getContext("2d")
     ctx.drawImage(imageBitmap, 0, 0)
     
-    const pngBlob = await canvas.convertToBlob({ type: "image/png" })
+    const jpegBlob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.85 })
     
     return new Promise((resolve, reject) => {
       const reader = new FileReader()
       reader.onload = () => resolve({ base64: reader.result })
-      reader.onerror = () => reject(new Error("Failed to read PNG blob"))
-      reader.readAsDataURL(pngBlob)
+      reader.onerror = () => reject(new Error("Failed to read JPEG blob"))
+      reader.readAsDataURL(jpegBlob)
     })
   } catch (error) {
     throw error
