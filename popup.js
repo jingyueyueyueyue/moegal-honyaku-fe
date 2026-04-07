@@ -6,6 +6,7 @@ const DEFAULT_OPTIONS = {
 }
 const AUTO_SAVE_IMAGE_KEY = "auto_save_image_enabled"
 const BASE64_UPLOAD_KEY = "base64_upload_enabled"
+const VERTICAL_TEXT_KEY = "vertical_text_enabled"
 
 let API_BASE = DEFAULT_API_BASE
 const BG_STORAGE_KEY = "popup_custom_background"
@@ -83,6 +84,7 @@ const view = {
   autoTranslateToggle: null,
   autoSaveImageToggle: null,
   base64UploadToggle: null,
+  verticalTextToggle: null,
   apiBaseInput: null,
   saveApiButton: null,
   apiTip: null,
@@ -322,6 +324,17 @@ async function loadBase64UploadState() {
   }
 }
 
+async function loadVerticalTextState() {
+  try {
+    const result = await chrome.storage.local.get(VERTICAL_TEXT_KEY)
+    const enabled = result[VERTICAL_TEXT_KEY] === true
+    view.verticalTextToggle.checked = enabled
+  } catch (error) {
+    console.error("读取竖排文字状态失败:", error)
+    view.verticalTextToggle.checked = false
+  }
+}
+
 async function saveAutoTranslateState(enabled) {
   try {
     await chrome.storage.local.set({ [AUTO_TRANSLATE_KEY]: enabled })
@@ -343,6 +356,14 @@ async function saveBase64UploadState(enabled) {
     await chrome.storage.local.set({ [BASE64_UPLOAD_KEY]: enabled })
   } catch (error) {
     console.error("保存Base64上传状态失败:", error)
+  }
+}
+
+async function saveVerticalTextState(enabled) {
+  try {
+    await chrome.storage.local.set({ [VERTICAL_TEXT_KEY]: enabled })
+  } catch (error) {
+    console.error("保存竖排文字状态失败:", error)
   }
 }
 
@@ -400,6 +421,30 @@ async function onBase64UploadChange(event) {
         try {
           await chrome.tabs.sendMessage(tab.id, {
             type: "BASE64_UPLOAD_TOGGLE",
+            enabled: enabled
+          })
+        } catch (e) {
+          // 忽略无法发送的标签页
+        }
+      }
+    }
+  } catch (error) {
+    console.error("通知content script失败:", error)
+  }
+}
+
+async function onVerticalTextChange(event) {
+  const enabled = event.target.checked
+  await saveVerticalTextState(enabled)
+  
+  // 通知所有标签页的 content script
+  try {
+    const tabs = await chrome.tabs.query({})
+    for (const tab of tabs) {
+      if (tab.id) {
+        try {
+          await chrome.tabs.sendMessage(tab.id, {
+            type: "VERTICAL_TEXT_TOGGLE",
             enabled: enabled
           })
         } catch (e) {
@@ -995,6 +1040,7 @@ function bindEvents() {
   view.autoTranslateToggle.addEventListener("change", onAutoTranslateChange)
   view.autoSaveImageToggle.addEventListener("change", onAutoSaveImageChange)
   view.base64UploadToggle.addEventListener("change", onBase64UploadChange)
+  view.verticalTextToggle.addEventListener("change", onVerticalTextChange)
 }
 
 async function init() {
@@ -1020,6 +1066,7 @@ async function init() {
   view.autoTranslateToggle = document.getElementById("auto-translate-toggle")
   view.autoSaveImageToggle = document.getElementById("auto-save-image-toggle")
   view.base64UploadToggle = document.getElementById("base64-upload-toggle")
+  view.verticalTextToggle = document.getElementById("vertical-text-toggle")
   view.apiBaseInput = document.getElementById("api-base-input")
   view.saveApiButton = document.getElementById("save-api-button")
   view.apiTip = document.getElementById("api-tip")
@@ -1036,6 +1083,7 @@ async function init() {
   loadAutoTranslateState()
   loadAutoSaveImageState()
   loadBase64UploadState()
+  loadVerticalTextState()
   await loadApiBase()
 
   bindEvents()

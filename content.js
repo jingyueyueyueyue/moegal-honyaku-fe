@@ -7,6 +7,7 @@ const API_BASE_STORAGE_KEY = "api_base_url"
 const AUTO_TRANSLATE_KEY = "auto_translate_enabled"
 const AUTO_SAVE_IMAGE_KEY = "auto_save_image_enabled"
 const BASE64_UPLOAD_KEY = "base64_upload_enabled"
+const VERTICAL_TEXT_KEY = "vertical_text_enabled"
 
 let API_BASE = DEFAULT_API_BASE
 let TRANSLATE_API_URL = `${API_BASE.replace(/\/+$/, "")}/api/v1/translate/web`
@@ -31,6 +32,7 @@ let autoTranslateQueue = []
 let isProcessingQueue = false
 let autoSaveImageEnabled = false
 let base64UploadEnabled = true  // 默认开启 base64 上传
+let verticalTextEnabled = false  // 默认横排文字
 
 function decodeSafe(text) {
     try {
@@ -319,6 +321,8 @@ async function getImageBase64(img) {
 
 async function getTranslatePayload(surface) {
     const referer = buildRefererBaseUrl()
+    const textDirection = verticalTextEnabled ? "vertical" : "horizontal"
+    
     if (surface instanceof HTMLImageElement) {
         // 根据开关决定使用 URL 还是 base64
         if (base64UploadEnabled) {
@@ -327,12 +331,14 @@ async function getTranslatePayload(surface) {
                 image_base64: imageBase64,
                 referer,
                 source_type: "img",
+                text_direction: textDirection,
             }
         } else {
             return {
                 image_url: surface.currentSrc || surface.src,
                 referer,
                 source_type: "img",
+                text_direction: textDirection,
             }
         }
     }
@@ -342,6 +348,7 @@ async function getTranslatePayload(surface) {
             image_base64: getCanvasImageBase64(surface),
             referer,
             source_type: "canvas",
+            text_direction: textDirection,
         }
     }
 
@@ -623,10 +630,11 @@ async function loadApiBase() {
 
 async function loadAutoTranslateState() {
     try {
-        const result = await chrome.storage.local.get([AUTO_TRANSLATE_KEY, AUTO_SAVE_IMAGE_KEY, BASE64_UPLOAD_KEY])
+        const result = await chrome.storage.local.get([AUTO_TRANSLATE_KEY, AUTO_SAVE_IMAGE_KEY, BASE64_UPLOAD_KEY, VERTICAL_TEXT_KEY])
         autoTranslateEnabled = result[AUTO_TRANSLATE_KEY] === true
         autoSaveImageEnabled = result[AUTO_SAVE_IMAGE_KEY] === true
         base64UploadEnabled = result[BASE64_UPLOAD_KEY] !== false  // 默认开启，只有明确设为 false 才关闭
+        verticalTextEnabled = result[VERTICAL_TEXT_KEY] === true  // 默认横排
         if (autoTranslateEnabled) {
             startAutoTranslate()
         }
@@ -711,6 +719,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "BASE64_UPLOAD_TOGGLE") {
         base64UploadEnabled = message.enabled
         console.log("Base64上传模式已", message.enabled ? "开启" : "关闭")
+    }
+    if (message.type === "VERTICAL_TEXT_TOGGLE") {
+        verticalTextEnabled = message.enabled
+        console.log("文字排版已切换为", message.enabled ? "竖排" : "横排")
     }
     if (message.type === "API_BASE_UPDATED") {
         API_BASE = message.apiBase || DEFAULT_API_BASE
