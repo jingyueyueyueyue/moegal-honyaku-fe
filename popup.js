@@ -7,6 +7,7 @@ const DEFAULT_OPTIONS = {
 const AUTO_SAVE_IMAGE_KEY = "auto_save_image_enabled"
 const BASE64_UPLOAD_KEY = "base64_upload_enabled"
 const VERTICAL_TEXT_KEY = "vertical_text_enabled"
+const AI_LINEBREAK_KEY = "ai_linebreak_enabled"
 
 let API_BASE = DEFAULT_API_BASE
 const BG_STORAGE_KEY = "popup_custom_background"
@@ -85,6 +86,7 @@ const view = {
   autoSaveImageToggle: null,
   base64UploadToggle: null,
   verticalTextToggle: null,
+  aiLinebreakToggle: null,
   apiBaseInput: null,
   saveApiButton: null,
   apiTip: null,
@@ -335,6 +337,18 @@ async function loadVerticalTextState() {
   }
 }
 
+async function loadAiLinebreakState() {
+  try {
+    const result = await chrome.storage.local.get(AI_LINEBREAK_KEY)
+    // 默认启用 AI 断句，只有明确设为 false 才关闭
+    const enabled = result[AI_LINEBREAK_KEY] !== false
+    view.aiLinebreakToggle.checked = enabled
+  } catch (error) {
+    console.error("读取AI断句状态失败:", error)
+    view.aiLinebreakToggle.checked = true
+  }
+}
+
 async function saveAutoTranslateState(enabled) {
   try {
     await chrome.storage.local.set({ [AUTO_TRANSLATE_KEY]: enabled })
@@ -364,6 +378,14 @@ async function saveVerticalTextState(enabled) {
     await chrome.storage.local.set({ [VERTICAL_TEXT_KEY]: enabled })
   } catch (error) {
     console.error("保存竖排文字状态失败:", error)
+  }
+}
+
+async function saveAiLinebreakState(enabled) {
+  try {
+    await chrome.storage.local.set({ [AI_LINEBREAK_KEY]: enabled })
+  } catch (error) {
+    console.error("保存AI断句状态失败:", error)
   }
 }
 
@@ -445,6 +467,30 @@ async function onVerticalTextChange(event) {
         try {
           await chrome.tabs.sendMessage(tab.id, {
             type: "VERTICAL_TEXT_TOGGLE",
+            enabled: enabled
+          })
+        } catch (e) {
+          // 忽略无法发送的标签页
+        }
+      }
+    }
+  } catch (error) {
+    console.error("通知content script失败:", error)
+  }
+}
+
+async function onAiLinebreakChange(event) {
+  const enabled = event.target.checked
+  await saveAiLinebreakState(enabled)
+  
+  // 通知所有标签页的 content script
+  try {
+    const tabs = await chrome.tabs.query({})
+    for (const tab of tabs) {
+      if (tab.id) {
+        try {
+          await chrome.tabs.sendMessage(tab.id, {
+            type: "AI_LINEBREAK_TOGGLE",
             enabled: enabled
           })
         } catch (e) {
@@ -1041,6 +1087,7 @@ function bindEvents() {
   view.autoSaveImageToggle.addEventListener("change", onAutoSaveImageChange)
   view.base64UploadToggle.addEventListener("change", onBase64UploadChange)
   view.verticalTextToggle.addEventListener("change", onVerticalTextChange)
+  view.aiLinebreakToggle.addEventListener("change", onAiLinebreakChange)
 }
 
 async function init() {
@@ -1067,6 +1114,7 @@ async function init() {
   view.autoSaveImageToggle = document.getElementById("auto-save-image-toggle")
   view.base64UploadToggle = document.getElementById("base64-upload-toggle")
   view.verticalTextToggle = document.getElementById("vertical-text-toggle")
+  view.aiLinebreakToggle = document.getElementById("ai-linebreak-toggle")
   view.apiBaseInput = document.getElementById("api-base-input")
   view.saveApiButton = document.getElementById("save-api-button")
   view.apiTip = document.getElementById("api-tip")
@@ -1084,6 +1132,7 @@ async function init() {
   loadAutoSaveImageState()
   loadBase64UploadState()
   loadVerticalTextState()
+  loadAiLinebreakState()
   await loadApiBase()
 
   bindEvents()

@@ -8,6 +8,7 @@ const AUTO_TRANSLATE_KEY = "auto_translate_enabled"
 const AUTO_SAVE_IMAGE_KEY = "auto_save_image_enabled"
 const BASE64_UPLOAD_KEY = "base64_upload_enabled"
 const VERTICAL_TEXT_KEY = "vertical_text_enabled"
+const AI_LINEBREAK_KEY = "ai_linebreak_enabled"
 
 let API_BASE = DEFAULT_API_BASE
 let TRANSLATE_API_URL = `${API_BASE.replace(/\/+$/, "")}/api/v1/translate/web`
@@ -33,6 +34,7 @@ let isProcessingQueue = false
 let autoSaveImageEnabled = false
 let base64UploadEnabled = true  // 默认开启 base64 上传
 let verticalTextEnabled = false  // 默认横排文字
+let aiLinebreakEnabled = true  // 默认启用 AI 断句
 
 function decodeSafe(text) {
     try {
@@ -332,6 +334,7 @@ async function getTranslatePayload(surface) {
                 referer,
                 source_type: "img",
                 text_direction: textDirection,
+                enable_linebreak: aiLinebreakEnabled,
             }
         } else {
             return {
@@ -339,6 +342,7 @@ async function getTranslatePayload(surface) {
                 referer,
                 source_type: "img",
                 text_direction: textDirection,
+                enable_linebreak: aiLinebreakEnabled,
             }
         }
     }
@@ -349,6 +353,7 @@ async function getTranslatePayload(surface) {
             referer,
             source_type: "canvas",
             text_direction: textDirection,
+            enable_linebreak: aiLinebreakEnabled,
         }
     }
 
@@ -630,11 +635,12 @@ async function loadApiBase() {
 
 async function loadAutoTranslateState() {
     try {
-        const result = await chrome.storage.local.get([AUTO_TRANSLATE_KEY, AUTO_SAVE_IMAGE_KEY, BASE64_UPLOAD_KEY, VERTICAL_TEXT_KEY])
+        const result = await chrome.storage.local.get([AUTO_TRANSLATE_KEY, AUTO_SAVE_IMAGE_KEY, BASE64_UPLOAD_KEY, VERTICAL_TEXT_KEY, AI_LINEBREAK_KEY])
         autoTranslateEnabled = result[AUTO_TRANSLATE_KEY] === true
         autoSaveImageEnabled = result[AUTO_SAVE_IMAGE_KEY] === true
         base64UploadEnabled = result[BASE64_UPLOAD_KEY] !== false  // 默认开启，只有明确设为 false 才关闭
         verticalTextEnabled = result[VERTICAL_TEXT_KEY] === true  // 默认横排
+        aiLinebreakEnabled = result[AI_LINEBREAK_KEY] !== false  // 默认启用 AI 断句
         if (autoTranslateEnabled) {
             startAutoTranslate()
         }
@@ -723,6 +729,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "VERTICAL_TEXT_TOGGLE") {
         verticalTextEnabled = message.enabled
         console.log("文字排版已切换为", message.enabled ? "竖排" : "横排")
+    }
+    if (message.type === "AI_LINEBREAK_TOGGLE") {
+        aiLinebreakEnabled = message.enabled
+        console.log("AI智能断句已", message.enabled ? "启用" : "禁用")
     }
     if (message.type === "API_BASE_UPDATED") {
         API_BASE = message.apiBase || DEFAULT_API_BASE
