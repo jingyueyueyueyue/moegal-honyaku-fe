@@ -449,3 +449,116 @@ body.has-custom-bg .toggle-card {
 .api-tip.is-error {
   color: var(--error);
 }
+
+/* 翻译配置和OCR配置卡片样式 */
+.translate-config-card,
+.ocr-config-card {
+  margin-bottom: 10px;
+}
+
+.config-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.config-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.input-with-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.input-with-toggle .field-input {
+  flex: 1;
+}
+
+.toggle-visibility-btn {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f9fafb;
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.toggle-visibility-btn:hover {
+  background: #f3f4f6;
+}
+
+.model-select-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-select {
+  flex: 1;
+}
+
+.icon-btn {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f9fafb;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.icon-btn:hover {
+  background: #e5e7eb;
+}
+
+.icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.custom-model-row {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line-soft);
+}
+
+.custom-model-row[hidden] {
+  display: none;
+}
+
+.config-tip {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.config-tip.is-error {
+  color: var(--error);
+}
+
+.config-tip.is-success {
+  color: var(--ok);
+}
+
+.vision-config-section {
+  margin-top: 10px;
+}
+
+.vision-config-section[hidden] {
+  display: none;
+}
+
+.config-actions {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+}

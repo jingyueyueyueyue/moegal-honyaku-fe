@@ -25,6 +25,105 @@
       <p class="api-tip" id="api-tip">默认: http://127.0.0.1:8000</p>
     </section>
 
+    <!-- 翻译服务配置 -->
+    <section class="form-card translate-config-card">
+      <div class="config-header">
+        <span class="config-title">翻译服务配置</span>
+      </div>
+      <label class="field" for="translate-provider-select">
+        <span class="field-label">供应商</span>
+        <select class="field-input" id="translate-provider-select">
+          <option value="openai">OpenAI</option>
+          <option value="dashscope">DashScope (阿里云)</option>
+        </select>
+      </label>
+      <label class="field" for="translate-api-key-input">
+        <span class="field-label">API Key</span>
+        <div class="input-with-toggle">
+          <input class="field-input" id="translate-api-key-input" type="password" placeholder="sk-...">
+          <button type="button" class="toggle-visibility-btn" data-target="translate-api-key-input" aria-label="显示/隐藏">👁</button>
+        </div>
+      </label>
+      <label class="field" for="translate-base-url-input">
+        <span class="field-label">Base URL</span>
+        <input class="field-input" id="translate-base-url-input" type="text" placeholder="https://api.openai.com/v1">
+      </label>
+      <label class="field" for="translate-model-select">
+        <span class="field-label">模型</span>
+        <div class="model-select-row">
+          <select class="field-input model-select" id="translate-model-select">
+            <option value="">-- 点击刷新获取模型 --</option>
+          </select>
+          <button type="button" id="translate-refresh-models-btn" class="icon-btn" title="获取模型列表">↻</button>
+          <button type="button" id="translate-custom-model-btn" class="icon-btn" title="自定义模型">✎</button>
+        </div>
+      </label>
+      <div class="custom-model-row" id="translate-custom-model-row" hidden>
+        <label class="field" for="translate-custom-model-input">
+          <span class="field-label">自定义模型名称</span>
+          <input class="field-input" id="translate-custom-model-input" type="text" placeholder="gpt-4o-mini">
+        </label>
+      </div>
+      <p class="config-tip" id="translate-config-tip"></p>
+      <div class="config-actions">
+        <button type="button" id="save-translate-config-btn" class="ghost-btn">保存配置</button>
+      </div>
+    </section>
+
+    <!-- OCR (多模态) 配置 -->
+    <section class="form-card ocr-config-card">
+      <div class="config-header">
+        <span class="config-title">OCR / 多模态配置</span>
+      </div>
+      <label class="field" for="ocr-engine-select">
+        <span class="field-label">OCR 引擎</span>
+        <select class="field-input" id="ocr-engine-select">
+          <option value="local">本地 OCR</option>
+          <option value="vision">Vision (多模态)</option>
+        </select>
+      </label>
+      <div class="vision-config-section" id="vision-config-section">
+        <label class="field" for="vision-provider-select">
+          <span class="field-label">Vision 供应商</span>
+          <select class="field-input" id="vision-provider-select">
+            <option value="openai">OpenAI</option>
+            <option value="dashscope">DashScope (阿里云)</option>
+          </select>
+        </label>
+        <label class="field" for="vision-api-key-input">
+          <span class="field-label">API Key</span>
+          <div class="input-with-toggle">
+            <input class="field-input" id="vision-api-key-input" type="password" placeholder="sk-...">
+            <button type="button" class="toggle-visibility-btn" data-target="vision-api-key-input" aria-label="显示/隐藏">👁</button>
+          </div>
+        </label>
+        <label class="field" for="vision-base-url-input">
+          <span class="field-label">Base URL</span>
+          <input class="field-input" id="vision-base-url-input" type="text" placeholder="https://api.openai.com/v1">
+        </label>
+        <label class="field" for="vision-model-select">
+          <span class="field-label">模型</span>
+          <div class="model-select-row">
+            <select class="field-input model-select" id="vision-model-select">
+              <option value="">-- 点击刷新获取模型 --</option>
+            </select>
+            <button type="button" id="vision-refresh-models-btn" class="icon-btn" title="获取模型列表">↻</button>
+            <button type="button" id="vision-custom-model-btn" class="icon-btn" title="自定义模型">✎</button>
+          </div>
+        </label>
+        <div class="custom-model-row" id="vision-custom-model-row" hidden>
+          <label class="field" for="vision-custom-model-input">
+            <span class="field-label">自定义模型名称</span>
+            <input class="field-input" id="vision-custom-model-input" type="text" placeholder="gpt-4o">
+          </label>
+        </div>
+      </div>
+      <p class="config-tip" id="vision-config-tip"></p>
+      <div class="config-actions">
+        <button type="button" id="save-vision-config-btn" class="ghost-btn">保存配置</button>
+      </div>
+    </section>
+
     <section class="form-card">
       <label class="field" for="provider-select">
         <span class="field-label">翻译供应商</span>

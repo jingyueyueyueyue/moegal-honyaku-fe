@@ -3,11 +3,23 @@ const API_BASE_STORAGE_KEY = "api_base_url"
 const DEFAULT_OPTIONS = {
   translate_api_type: ["openai", "dashscope"],
   translate_mode: ["parallel", "structured"],
+  ocr_engine: ["local", "vision"],
+  vision_ocr_provider: ["openai", "dashscope"],
 }
 const AUTO_SAVE_IMAGE_KEY = "auto_save_image_enabled"
 const BASE64_UPLOAD_KEY = "base64_upload_enabled"
 const VERTICAL_TEXT_KEY = "vertical_text_enabled"
 const AI_LINEBREAK_KEY = "ai_linebreak_enabled"
+
+// 配置本地缓存 key
+const TRANSLATE_CONFIG_CACHE_KEY = "translate_config_cache"
+const OCR_CONFIG_CACHE_KEY = "ocr_config_cache"
+
+// 默认 Base URL
+const DEFAULT_BASE_URLS = {
+  openai: "https://api.openai.com/v1",
+  dashscope: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+}
 
 let API_BASE = DEFAULT_API_BASE
 const BG_STORAGE_KEY = "popup_custom_background"
@@ -60,6 +72,23 @@ const state = {
     resolve: null,
     reject: null,
   },
+  // 翻译配置状态
+  translateConfig: {
+    provider: "openai",
+    apiKey: "",
+    baseUrl: "",
+    model: "",
+    models: [],
+  },
+  // OCR/Vision 配置状态
+  ocrConfig: {
+    engine: "local",
+    provider: "openai",
+    apiKey: "",
+    baseUrl: "",
+    model: "",
+    models: [],
+  },
 }
 
 const view = {
@@ -90,6 +119,30 @@ const view = {
   apiBaseInput: null,
   saveApiButton: null,
   apiTip: null,
+  // 翻译配置
+  translateProviderSelect: null,
+  translateApiKeyInput: null,
+  translateBaseUrlInput: null,
+  translateModelSelect: null,
+  translateRefreshModelsBtn: null,
+  translateCustomModelBtn: null,
+  translateCustomModelRow: null,
+  translateCustomModelInput: null,
+  translateConfigTip: null,
+  saveTranslateConfigBtn: null,
+  // OCR/Vision 配置
+  ocrEngineSelect: null,
+  visionConfigSection: null,
+  visionProviderSelect: null,
+  visionApiKeyInput: null,
+  visionBaseUrlInput: null,
+  visionModelSelect: null,
+  visionRefreshModelsBtn: null,
+  visionCustomModelBtn: null,
+  visionCustomModelRow: null,
+  visionCustomModelInput: null,
+  visionConfigTip: null,
+  saveVisionConfigBtn: null,
 }
 
 function clamp(value, min, max) {
@@ -482,7 +535,7 @@ async function onVerticalTextChange(event) {
 async function onAiLinebreakChange(event) {
   const enabled = event.target.checked
   await saveAiLinebreakState(enabled)
-  
+
   // 通知所有标签页的 content script
   try {
     const tabs = await chrome.tabs.query({})
@@ -500,6 +553,476 @@ async function onAiLinebreakChange(event) {
     }
   } catch (error) {
     console.error("通知content script失败:", error)
+  }
+}
+
+// ========== 翻译配置管理 ==========
+
+function setTranslateConfigTip(text, type) {
+  view.translateConfigTip.textContent = text || ""
+  view.translateConfigTip.className = `config-tip ${type ? `is-${type}` : ""}`
+}
+
+function renderTranslateModels(models, selectedModel) {
+  view.translateModelSelect.innerHTML = ""
+  if (!models || models.length === 0) {
+    const option = document.createElement("option")
+    option.value = ""
+    option.textContent = "-- 无可用模型 --"
+    view.translateModelSelect.appendChild(option)
+    return
+  }
+
+  models.forEach(modelId => {
+    const option = document.createElement("option")
+    option.value = modelId
+    option.textContent = modelId
+    if (modelId === selectedModel) {
+      option.selected = true
+    }
+    view.translateModelSelect.appendChild(option)
+  })
+}
+
+function updateTranslateBaseUrl() {
+  const provider = view.translateProviderSelect.value
+  const defaultUrl = DEFAULT_BASE_URLS[provider] || ""
+  if (!view.translateBaseUrlInput.value.trim()) {
+    view.translateBaseUrlInput.value = defaultUrl
+    state.translateConfig.baseUrl = defaultUrl
+  }
+}
+
+async function onTranslateProviderChange(event) {
+  const provider = event.target.value
+  state.translateConfig.provider = provider
+  updateTranslateBaseUrl()
+
+  // 清空模型列表
+  state.translateConfig.models = []
+  view.translateModelSelect.innerHTML = '<option value="">-- 点击刷新获取模型 --</option>'
+  view.translateCustomModelRow.hidden = true
+  setTranslateConfigTip("")
+
+  // 同步旧的 provider-select
+  view.providerSelect.value = provider
+}
+
+async function onTranslateRefreshModels() {
+  const baseUrl = view.translateBaseUrlInput.value.trim()
+  const apiKey = view.translateApiKeyInput.value.trim()
+
+  view.translateRefreshModelsBtn.disabled = true
+  setTranslateConfigTip("正在获取模型列表...", "")
+
+  try {
+    const models = await fetchModels(baseUrl, apiKey)
+    state.translateConfig.models = models
+    renderTranslateModels(models, state.translateConfig.model)
+    setTranslateConfigTip(`获取到 ${models.length} 个模型`, "success")
+  } catch (error) {
+    console.error("获取翻译模型列表失败:", error)
+    setTranslateConfigTip(error.message, "error")
+  } finally {
+    view.translateRefreshModelsBtn.disabled = false
+  }
+}
+
+function onTranslateCustomModelToggle() {
+  view.translateCustomModelRow.hidden = !view.translateCustomModelRow.hidden
+  if (!view.translateCustomModelRow.hidden) {
+    view.translateCustomModelInput.focus()
+  }
+}
+
+function onTranslateCustomModelInput(event) {
+  const customModel = event.target.value.trim()
+  if (customModel) {
+    // 添加自定义模型到下拉框
+    const exists = Array.from(view.translateModelSelect.options).some(opt => opt.value === customModel)
+    if (!exists) {
+      const option = document.createElement("option")
+      option.value = customModel
+      option.textContent = `${customModel} (自定义)`
+      view.translateModelSelect.appendChild(option)
+    }
+    view.translateModelSelect.value = customModel
+    state.translateConfig.model = customModel
+  }
+}
+
+async function onTranslateConfigSave() {
+  const provider = view.translateProviderSelect.value
+  const apiKey = view.translateApiKeyInput.value.trim()
+  const baseUrl = view.translateBaseUrlInput.value.trim()
+  const model = view.translateModelSelect.value
+
+  state.translateConfig.provider = provider
+  state.translateConfig.apiKey = apiKey
+  state.translateConfig.baseUrl = baseUrl
+  state.translateConfig.model = model
+
+  setTranslateConfigTip("保存中...", "")
+
+  try {
+    const config = {
+      translate_api_type: provider,
+    }
+    if (apiKey) config[`${provider}_api_key`] = apiKey
+    if (baseUrl) config[`${provider}_base_url`] = baseUrl
+    if (model) config[`${provider}_model`] = model
+
+    await batchUpdateConf(config)
+
+    // 同步旧的 provider-select
+    view.providerSelect.value = provider
+    state.current.translate_api_type = provider
+
+    setTranslateConfigTip("保存成功", "success")
+  } catch (error) {
+    console.error("保存翻译配置失败:", error)
+    setTranslateConfigTip(error.message, "error")
+  }
+}
+
+// ========== OCR/Vision 配置管理 ==========
+
+function setVisionConfigTip(text, type) {
+  view.visionConfigTip.textContent = text || ""
+  view.visionConfigTip.className = `config-tip ${type ? `is-${type}` : ""}`
+}
+
+function renderVisionModels(models, selectedModel) {
+  view.visionModelSelect.innerHTML = ""
+  if (!models || models.length === 0) {
+    const option = document.createElement("option")
+    option.value = ""
+    option.textContent = "-- 无可用模型 --"
+    view.visionModelSelect.appendChild(option)
+    return
+  }
+
+  models.forEach(modelId => {
+    const option = document.createElement("option")
+    option.value = modelId
+    option.textContent = modelId
+    if (modelId === selectedModel) {
+      option.selected = true
+    }
+    view.visionModelSelect.appendChild(option)
+  })
+}
+
+function updateVisionConfigVisibility() {
+  const engine = view.ocrEngineSelect.value
+  view.visionConfigSection.hidden = engine !== "vision"
+  state.ocrConfig.engine = engine
+}
+
+function updateVisionBaseUrl() {
+  const provider = view.visionProviderSelect.value
+  const defaultUrl = DEFAULT_BASE_URLS[provider] || ""
+  if (!view.visionBaseUrlInput.value.trim()) {
+    view.visionBaseUrlInput.value = defaultUrl
+    state.ocrConfig.baseUrl = defaultUrl
+  }
+}
+
+async function onOcrEngineChange(event) {
+  updateVisionConfigVisibility()
+  setVisionConfigTip("")
+}
+
+async function onVisionProviderChange(event) {
+  const provider = event.target.value
+  state.ocrConfig.provider = provider
+  updateVisionBaseUrl()
+
+  // 清空模型列表
+  state.ocrConfig.models = []
+  view.visionModelSelect.innerHTML = '<option value="">-- 点击刷新获取模型 --</option>'
+  view.visionCustomModelRow.hidden = true
+  setVisionConfigTip("")
+}
+
+async function onVisionRefreshModels() {
+  const baseUrl = view.visionBaseUrlInput.value.trim()
+  const apiKey = view.visionApiKeyInput.value.trim()
+
+  view.visionRefreshModelsBtn.disabled = true
+  setVisionConfigTip("正在获取模型列表...", "")
+
+  try {
+    const models = await fetchModels(baseUrl, apiKey)
+    state.ocrConfig.models = models
+    renderVisionModels(models, state.ocrConfig.model)
+    setVisionConfigTip(`获取到 ${models.length} 个模型`, "success")
+  } catch (error) {
+    console.error("获取Vision模型列表失败:", error)
+    setVisionConfigTip(error.message, "error")
+  } finally {
+    view.visionRefreshModelsBtn.disabled = false
+  }
+}
+
+function onVisionCustomModelToggle() {
+  view.visionCustomModelRow.hidden = !view.visionCustomModelRow.hidden
+  if (!view.visionCustomModelRow.hidden) {
+    view.visionCustomModelInput.focus()
+  }
+}
+
+function onVisionCustomModelInput(event) {
+  const customModel = event.target.value.trim()
+  if (customModel) {
+    const exists = Array.from(view.visionModelSelect.options).some(opt => opt.value === customModel)
+    if (!exists) {
+      const option = document.createElement("option")
+      option.value = customModel
+      option.textContent = `${customModel} (自定义)`
+      view.visionModelSelect.appendChild(option)
+    }
+    view.visionModelSelect.value = customModel
+    state.ocrConfig.model = customModel
+  }
+}
+
+async function onVisionConfigSave() {
+  const engine = view.ocrEngineSelect.value
+  const provider = view.visionProviderSelect.value
+  const apiKey = view.visionApiKeyInput.value.trim()
+  const baseUrl = view.visionBaseUrlInput.value.trim()
+  const model = view.visionModelSelect.value
+
+  state.ocrConfig.engine = engine
+  state.ocrConfig.provider = provider
+  state.ocrConfig.apiKey = apiKey
+  state.ocrConfig.baseUrl = baseUrl
+  state.ocrConfig.model = model
+
+  setVisionConfigTip("保存中...", "")
+
+  try {
+    const config = {
+      ocr_engine: engine,
+    }
+
+    if (engine === "vision") {
+      config.vision_ocr_provider = provider
+      if (apiKey) config[`vision_${provider}_api_key`] = apiKey
+      if (baseUrl) config[`vision_${provider}_base_url`] = baseUrl
+      if (model) config[`vision_${provider}_model`] = model
+    }
+
+    await batchUpdateConf(config)
+    setVisionConfigTip("保存成功", "success")
+  } catch (error) {
+    console.error("保存Vision配置失败:", error)
+    setVisionConfigTip(error.message, "error")
+  }
+}
+
+// 加载配置到 UI
+function loadConfigToUI(conf) {
+  // 翻译配置
+  const translateProvider = conf.translate_api_type || "openai"
+  view.translateProviderSelect.value = translateProvider
+  view.translateApiKeyInput.value = conf[`${translateProvider}_api_key`] || ""
+  view.translateBaseUrlInput.value = conf[`${translateProvider}_base_url`] || DEFAULT_BASE_URLS[translateProvider] || ""
+  view.translateModelSelect.innerHTML = '<option value="">-- 点击刷新获取模型 --</option>'
+
+  const translateModel = conf[`${translateProvider}_model`] || ""
+  if (translateModel) {
+    const option = document.createElement("option")
+    option.value = translateModel
+    option.textContent = translateModel
+    view.translateModelSelect.appendChild(option)
+    view.translateModelSelect.value = translateModel
+  }
+
+  state.translateConfig = {
+    provider: translateProvider,
+    apiKey: conf[`${translateProvider}_api_key`] || "",
+    baseUrl: conf[`${translateProvider}_base_url`] || "",
+    model: translateModel,
+    models: [],
+  }
+
+  // OCR 配置
+  const ocrEngine = conf.ocr_engine || "local"
+  view.ocrEngineSelect.value = ocrEngine
+  updateVisionConfigVisibility()
+
+  if (ocrEngine === "vision") {
+    const visionProvider = conf.vision_ocr_provider || "openai"
+    view.visionProviderSelect.value = visionProvider
+    view.visionApiKeyInput.value = conf[`vision_${visionProvider}_api_key`] || ""
+    view.visionBaseUrlInput.value = conf[`vision_${visionProvider}_base_url`] || DEFAULT_BASE_URLS[visionProvider] || ""
+    view.visionModelSelect.innerHTML = '<option value="">-- 点击刷新获取模型 --</option>'
+
+    const visionModel = conf[`vision_${visionProvider}_model`] || ""
+    if (visionModel) {
+      const option = document.createElement("option")
+      option.value = visionModel
+      option.textContent = visionModel
+      view.visionModelSelect.appendChild(option)
+      view.visionModelSelect.value = visionModel
+    }
+
+    state.ocrConfig = {
+      engine: ocrEngine,
+      provider: visionProvider,
+      apiKey: conf[`vision_${visionProvider}_api_key`] || "",
+      baseUrl: conf[`vision_${visionProvider}_base_url`] || "",
+      model: visionModel,
+      models: [],
+    }
+  } else {
+    state.ocrConfig = {
+      engine: ocrEngine,
+      provider: "openai",
+      apiKey: "",
+      baseUrl: "",
+      model: "",
+      models: [],
+    }
+  }
+}
+
+// 密码可见性切换
+function onToggleVisibility(event) {
+  const btn = event.target
+  const targetId = btn.dataset.target
+  if (!targetId) return
+
+  const input = document.getElementById(targetId)
+  if (!input) return
+
+  if (input.type === "password") {
+    input.type = "text"
+    btn.textContent = "🔒"
+  } else {
+    input.type = "password"
+    btn.textContent = "👁"
+  }
+}
+
+// ========== 配置本地缓存 ==========
+
+// 保存翻译配置到本地
+function saveTranslateConfigCache() {
+  try {
+    const config = {
+      provider: view.translateProviderSelect.value,
+      apiKey: view.translateApiKeyInput.value.trim(),
+      baseUrl: view.translateBaseUrlInput.value.trim(),
+      model: view.translateModelSelect.value,
+    }
+    localStorage.setItem(TRANSLATE_CONFIG_CACHE_KEY, JSON.stringify(config))
+  } catch (e) {
+    console.error("缓存翻译配置失败:", e)
+  }
+}
+
+// 恢复翻译配置
+function restoreTranslateConfigCache() {
+  try {
+    const raw = localStorage.getItem(TRANSLATE_CONFIG_CACHE_KEY)
+    if (!raw) return false
+    const config = JSON.parse(raw)
+
+    if (config.provider) {
+      view.translateProviderSelect.value = config.provider
+    }
+    if (config.apiKey) {
+      view.translateApiKeyInput.value = config.apiKey
+    }
+    if (config.baseUrl) {
+      view.translateBaseUrlInput.value = config.baseUrl
+    }
+    if (config.model) {
+      // 添加模型选项
+      const exists = Array.from(view.translateModelSelect.options).some(opt => opt.value === config.model)
+      if (!exists) {
+        const option = document.createElement("option")
+        option.value = config.model
+        option.textContent = config.model
+        view.translateModelSelect.appendChild(option)
+      }
+      view.translateModelSelect.value = config.model
+    }
+
+    // 更新状态
+    state.translateConfig.provider = config.provider || "openai"
+    state.translateConfig.apiKey = config.apiKey || ""
+    state.translateConfig.baseUrl = config.baseUrl || ""
+    state.translateConfig.model = config.model || ""
+
+    return true
+  } catch (e) {
+    console.error("恢复翻译配置缓存失败:", e)
+    return false
+  }
+}
+
+// 保存 OCR 配置到本地
+function saveOcrConfigCache() {
+  try {
+    const config = {
+      engine: view.ocrEngineSelect.value,
+      provider: view.visionProviderSelect.value,
+      apiKey: view.visionApiKeyInput.value.trim(),
+      baseUrl: view.visionBaseUrlInput.value.trim(),
+      model: view.visionModelSelect.value,
+    }
+    localStorage.setItem(OCR_CONFIG_CACHE_KEY, JSON.stringify(config))
+  } catch (e) {
+    console.error("缓存 OCR 配置失败:", e)
+  }
+}
+
+// 恢复 OCR 配置
+function restoreOcrConfigCache() {
+  try {
+    const raw = localStorage.getItem(OCR_CONFIG_CACHE_KEY)
+    if (!raw) return false
+    const config = JSON.parse(raw)
+
+    if (config.engine) {
+      view.ocrEngineSelect.value = config.engine
+      updateVisionConfigVisibility()
+    }
+    if (config.provider) {
+      view.visionProviderSelect.value = config.provider
+    }
+    if (config.apiKey) {
+      view.visionApiKeyInput.value = config.apiKey
+    }
+    if (config.baseUrl) {
+      view.visionBaseUrlInput.value = config.baseUrl
+    }
+    if (config.model) {
+      const exists = Array.from(view.visionModelSelect.options).some(opt => opt.value === config.model)
+      if (!exists) {
+        const option = document.createElement("option")
+        option.value = config.model
+        option.textContent = config.model
+        view.visionModelSelect.appendChild(option)
+      }
+      view.visionModelSelect.value = config.model
+    }
+
+    // 更新状态
+    state.ocrConfig.engine = config.engine || "local"
+    state.ocrConfig.provider = config.provider || "openai"
+    state.ocrConfig.apiKey = config.apiKey || ""
+    state.ocrConfig.baseUrl = config.baseUrl || ""
+    state.ocrConfig.model = config.model || ""
+
+    return true
+  } catch (e) {
+    console.error("恢复 OCR 配置缓存失败:", e)
+    return false
   }
 }
 
@@ -922,6 +1445,58 @@ async function queryConf() {
   return requestJSON("/conf/query", { method: "GET" })
 }
 
+async function batchUpdateConf(config) {
+  return requestJSON("/conf/batch-update", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(config),
+  })
+}
+
+// 获取模型列表（调用 OpenAI 兼容 API）
+async function fetchModels(baseUrl, apiKey) {
+  if (!baseUrl || !apiKey) {
+    throw new Error("请先填写 Base URL 和 API Key")
+  }
+
+  // 确保 URL 不以 / 结尾
+  const cleanUrl = baseUrl.replace(/\/+$/, "")
+  const modelsUrl = `${cleanUrl}/models`
+
+  const response = await fetch(modelsUrl, {
+    method: "GET",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+    },
+  })
+
+  if (!response.ok) {
+    let errorMsg = `获取模型列表失败 (${response.status})`
+    try {
+      const errorData = await response.json()
+      errorMsg = errorData.error?.message || errorMsg
+    } catch (e) {
+      // 忽略解析错误
+    }
+    throw new Error(errorMsg)
+  }
+
+  const data = await response.json()
+  if (!data.data || !Array.isArray(data.data)) {
+    throw new Error("模型列表格式错误")
+  }
+
+  // 过滤并排序模型
+  const models = data.data
+    .filter(m => m.id && typeof m.id === "string")
+    .map(m => m.id)
+    .sort((a, b) => a.localeCompare(b))
+
+  return models
+}
+
 async function updateConf(attr, value) {
   return requestJSON("/conf/update", {
     method: "POST",
@@ -1001,8 +1576,14 @@ async function syncConfig() {
     state.hydrating = true
     renderSelect(view.providerSelect, state.options.translate_api_type, providerLabel)
     renderSelect(view.modeSelect, state.options.translate_mode, modeLabel)
-    applyConfig(await queryConf())
+    const conf = await queryConf()
+    applyConfig(conf)
+    loadConfigToUI(conf)
     state.hydrating = false
+
+    // 加载后端配置后，尝试用本地缓存覆盖（优先使用用户之前输入的内容）
+    restoreTranslateConfigCache()
+    restoreOcrConfigCache()
 
     view.lastSync.textContent = now()
     setStatus("已同步", "is-ok")
@@ -1088,6 +1669,65 @@ function bindEvents() {
   view.base64UploadToggle.addEventListener("change", onBase64UploadChange)
   view.verticalTextToggle.addEventListener("change", onVerticalTextChange)
   view.aiLinebreakToggle.addEventListener("change", onAiLinebreakChange)
+
+  // 翻译配置事件
+  view.translateProviderSelect.addEventListener("change", () => {
+    onTranslateProviderChange()
+    saveTranslateConfigCache()
+  })
+  view.translateRefreshModelsBtn.addEventListener("click", onTranslateRefreshModels)
+  view.translateCustomModelBtn.addEventListener("click", onTranslateCustomModelToggle)
+  view.translateCustomModelInput.addEventListener("input", (event) => {
+    onTranslateCustomModelInput(event)
+    saveTranslateConfigCache()
+  })
+  view.translateApiKeyInput.addEventListener("input", () => {
+    state.translateConfig.apiKey = view.translateApiKeyInput.value.trim()
+    saveTranslateConfigCache()
+  })
+  view.translateBaseUrlInput.addEventListener("input", () => {
+    state.translateConfig.baseUrl = view.translateBaseUrlInput.value.trim()
+    saveTranslateConfigCache()
+  })
+  view.translateModelSelect.addEventListener("change", (event) => {
+    state.translateConfig.model = event.target.value
+    saveTranslateConfigCache()
+  })
+  view.saveTranslateConfigBtn.addEventListener("click", onTranslateConfigSave)
+
+  // OCR/Vision 配置事件
+  view.ocrEngineSelect.addEventListener("change", () => {
+    onOcrEngineChange()
+    saveOcrConfigCache()
+  })
+  view.visionProviderSelect.addEventListener("change", () => {
+    onVisionProviderChange()
+    saveOcrConfigCache()
+  })
+  view.visionRefreshModelsBtn.addEventListener("click", onVisionRefreshModels)
+  view.visionCustomModelBtn.addEventListener("click", onVisionCustomModelToggle)
+  view.visionCustomModelInput.addEventListener("input", (event) => {
+    onVisionCustomModelInput(event)
+    saveOcrConfigCache()
+  })
+  view.visionApiKeyInput.addEventListener("input", () => {
+    state.ocrConfig.apiKey = view.visionApiKeyInput.value.trim()
+    saveOcrConfigCache()
+  })
+  view.visionBaseUrlInput.addEventListener("input", () => {
+    state.ocrConfig.baseUrl = view.visionBaseUrlInput.value.trim()
+    saveOcrConfigCache()
+  })
+  view.visionModelSelect.addEventListener("change", (event) => {
+    state.ocrConfig.model = event.target.value
+    saveOcrConfigCache()
+  })
+  view.saveVisionConfigBtn.addEventListener("click", onVisionConfigSave)
+
+  // 密码可见性切换
+  document.querySelectorAll(".toggle-visibility-btn").forEach(btn => {
+    btn.addEventListener("click", onToggleVisibility)
+  })
 }
 
 async function init() {
@@ -1119,6 +1759,32 @@ async function init() {
   view.saveApiButton = document.getElementById("save-api-button")
   view.apiTip = document.getElementById("api-tip")
 
+  // 翻译配置元素
+  view.translateProviderSelect = document.getElementById("translate-provider-select")
+  view.translateApiKeyInput = document.getElementById("translate-api-key-input")
+  view.translateBaseUrlInput = document.getElementById("translate-base-url-input")
+  view.translateModelSelect = document.getElementById("translate-model-select")
+  view.translateRefreshModelsBtn = document.getElementById("translate-refresh-models-btn")
+  view.translateCustomModelBtn = document.getElementById("translate-custom-model-btn")
+  view.translateCustomModelRow = document.getElementById("translate-custom-model-row")
+  view.translateCustomModelInput = document.getElementById("translate-custom-model-input")
+  view.translateConfigTip = document.getElementById("translate-config-tip")
+  view.saveTranslateConfigBtn = document.getElementById("save-translate-config-btn")
+
+  // OCR/Vision 配置元素
+  view.ocrEngineSelect = document.getElementById("ocr-engine-select")
+  view.visionConfigSection = document.getElementById("vision-config-section")
+  view.visionProviderSelect = document.getElementById("vision-provider-select")
+  view.visionApiKeyInput = document.getElementById("vision-api-key-input")
+  view.visionBaseUrlInput = document.getElementById("vision-base-url-input")
+  view.visionModelSelect = document.getElementById("vision-model-select")
+  view.visionRefreshModelsBtn = document.getElementById("vision-refresh-models-btn")
+  view.visionCustomModelBtn = document.getElementById("vision-custom-model-btn")
+  view.visionCustomModelRow = document.getElementById("vision-custom-model-row")
+  view.visionCustomModelInput = document.getElementById("vision-custom-model-input")
+  view.visionConfigTip = document.getElementById("vision-config-tip")
+  view.saveVisionConfigBtn = document.getElementById("save-vision-config-btn")
+
   resetCropperState()
   hydrateCachedConfig()
 
@@ -1136,7 +1802,12 @@ async function init() {
   await loadApiBase()
 
   bindEvents()
-  syncConfig()
+
+  // 恢复本地缓存的配置
+  restoreTranslateConfigCache()
+  restoreOcrConfigCache()
+
+  await syncConfig()
 }
 
 init()
