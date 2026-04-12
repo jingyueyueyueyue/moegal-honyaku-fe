@@ -10,6 +10,37 @@ const BASE64_UPLOAD_KEY = "base64_upload_enabled"
 const VERTICAL_TEXT_KEY = "vertical_text_enabled"
 const AI_LINEBREAK_KEY = "ai_linebreak_enabled"
 
+// 检测扩展上下文是否有效
+let isExtensionContextValid = true
+function checkExtensionContext() {
+    try {
+        // 尝试访问 chrome.runtime.id，如果扩展被重载会抛出异常
+        return !!(chrome.runtime && chrome.runtime.id)
+    } catch (e) {
+        isExtensionContextValid = false
+        return false
+    }
+}
+
+// 显示扩展重载提示
+function showExtensionReloadNotice() {
+    if (document.getElementById('moegal-extension-notice')) return
+    
+    const notice = document.createElement('div')
+    notice.id = 'moegal-extension-notice'
+    notice.style.cssText = `
+        position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+        background: #ff6b6b; color: white; padding: 10px 20px;
+        border-radius: 5px; z-index: 99999; font-size: 14px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    `
+    notice.textContent = '扩展已更新，请刷新页面'
+    document.body.appendChild(notice)
+    
+    // 3秒后自动隐藏
+    setTimeout(() => notice.remove(), 3000)
+}
+
 let API_BASE = DEFAULT_API_BASE
 let TRANSLATE_API_URL = `${API_BASE.replace(/\/+$/, "")}/api/v1/translate/web`
 
@@ -365,20 +396,27 @@ async function getImageBase64(img) {
     }
     
     // 尝试使用 background script 获取图片（绑定 CORS）
-    try {
-        const response = await chrome.runtime.sendMessage({
-            type: "FETCH_IMAGE",
-            url: src,
-            referer: window.location.href
-        })
-        if (response.error) {
-            throw new Error(response.error)
+    if (checkExtensionContext()) {
+        try {
+            const response = await chrome.runtime.sendMessage({
+                type: "FETCH_IMAGE",
+                url: src,
+                referer: window.location.href
+            })
+            if (response.error) {
+                throw new Error(response.error)
+            }
+            if (response.base64) {
+                return response.base64
+            }
+        } catch (bgError) {
+            // 扩展上下文无效时抛出特定错误
+            if (bgError.message && bgError.message.includes('Extension context invalidated')) {
+                showExtensionReloadNotice()
+                throw new Error("扩展已更新，请刷新页面")
+            }
+            console.warn("Background fetch failed:", bgError)
         }
-        if (response.base64) {
-            return response.base64
-        }
-    } catch (bgError) {
-        console.warn("Background fetch failed:", bgError)
     }
     
     // 如果 background script 失败，尝试直�?fetch
@@ -530,8 +568,15 @@ function ensureCanvasOverlay(canvas) {
     return state
 }
 
+// 保存原始图片 src 的 Map
+const originalImageSrc = new WeakMap()
+
 function applyTranslatedResult(surface, translatedDataUrl) {
     if (surface instanceof HTMLImageElement) {
+        // 保存原始 src 用于重新翻译
+        if (!originalImageSrc.has(surface)) {
+            originalImageSrc.set(surface, surface.src)
+        }
         surface.src = translatedDataUrl
         return
     }
@@ -541,6 +586,44 @@ function applyTranslatedResult(surface, translatedDataUrl) {
         overlayState.image.src = translatedDataUrl
         overlayState.overlay.hidden = false
         syncCanvasOverlayBounds(overlayState)
+    }
+}
+
+// 重新翻译所有已翻译的图片（用于设置改变后）
+async function retranslateAllImages() {
+    if (!autoTranslateEnabled) return
+    
+    const surfaces = document.querySelectorAll("img, canvas")
+    const toRetranslate = []
+    
+    surfaces.forEach((surface) => {
+        // 检查是否有保存的原始 src（表示已翻译过）
+        if (surface instanceof HTMLImageElement && originalImageSrc.has(surface)) {
+            // 恢复原始 src
+            const originalSrc = originalImageSrc.get(surface)
+            surface.src = originalSrc
+            // 从已翻译集合中移除
+            translatedSurfaces.delete(surface)
+            toRetranslate.push(surface)
+        }
+    })
+    
+    if (toRetranslate.length > 0) {
+        console.log(`重新翻译 ${toRetranslate.length} 张图片`)
+        // 加入队列
+        toRetranslate.forEach(surface => {
+            if (!autoTranslateQueue.includes(surface)) {
+                autoTranslateQueue.push(surface)
+            }
+        })
+        // 触发处理
+        if (translateMode === "context-batch") {
+            scheduleBatchProcess()
+        } else if (translateMode === "context-sequential") {
+            processSequentialTranslate()
+        } else {
+            processAutoTranslateQueue()
+        }
     }
 }
 
@@ -572,6 +655,12 @@ function downloadTranslatedImage(translatedDataUrl, sourceUrl) {
 }
 
 async function requestTranslation(surface) {
+    // 检查扩展上下文是否有效
+    if (!checkExtensionContext()) {
+        showExtensionReloadNotice()
+        throw new Error("扩展已更新，请刷新页面")
+    }
+    
     const payload = await getTranslatePayload(surface)
     
     // 通过 background.js 的 Service Worker 代理请求，绕过混合内容限制
@@ -1232,6 +1321,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "VERTICAL_TEXT_TOGGLE") {
         verticalTextEnabled = message.enabled
         console.log("文字排版已切换为", message.enabled ? "竖排" : "横排")
+        // 重新翻译所有已翻译的图片
+        retranslateAllImages()
     }
     if (message.type === "AI_LINEBREAK_TOGGLE") {
         aiLinebreakEnabled = message.enabled
