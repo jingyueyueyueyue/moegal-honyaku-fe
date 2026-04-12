@@ -33,6 +33,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch((error) => sendResponse({ error: error.message }))
     return true // Keep the message channel open for async response
   }
+  
+  if (message.type === "BATCH_TRANSLATE_REQUEST") {
+    fetchTranslateApi(message.url, message.payload)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ error: error.message }))
+    return true
+  }
+  
+  if (message.type === "SEQUENTIAL_TRANSLATE_REQUEST") {
+    fetchTranslateApi(message.url, message.payload)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ error: error.message }))
+    return true
+  }
 })
 
 // 通过 Service Worker 代理翻译请求，绕过混合内容限制

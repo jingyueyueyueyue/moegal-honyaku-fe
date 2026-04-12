@@ -36,6 +36,10 @@ let base64UploadEnabled = true  // 默认开启 base64 上传
 let verticalTextEnabled = false  // 默认横排文字
 let aiLinebreakEnabled = true  // 默认启用 AI 断句
 
+// 翻译模式相关
+let translateMode = "parallel"  // parallel, structured, context, context-batch, context-sequential
+let sequentialContext = []  // 用于 context-sequential 模式的累积上下文
+
 function decodeSafe(text) {
     try {
         return decodeURIComponent(text)
@@ -181,6 +185,101 @@ function isTranslatableSurface(surface) {
     if (surface instanceof HTMLImageElement) return isTranslatableImage(surface)
     if (surface instanceof HTMLCanvasElement) return isTranslatableCanvas(surface)
     return false
+}
+
+// 检查图片是否"可能"可翻译（即使未加载完成）
+// 用于在图片加载前就将其加入队列
+function isPotentiallyTranslatable(surface) {
+    if (surface instanceof HTMLCanvasElement) {
+        return isTranslatableCanvas(surface)
+    }
+    if (!(surface instanceof HTMLImageElement)) return false
+    if (isManagedOverlayNode(surface)) return false
+    
+    // 检查渲染尺寸（即使图片未加载，DOM 尺寸可能已有）
+    const rect = getSurfaceRect(surface)
+    if (rect.width < MIN_RENDERED_WIDTH || rect.height < MIN_RENDERED_HEIGHT) return false
+    if (rect.width * rect.height < MIN_RENDERED_AREA) return false
+    
+    // 检查 src
+    const src = decodeSafe((surface.currentSrc || surface.src || "").toLowerCase())
+    if (!src) return false
+    if (src.startsWith("data:image/svg") || /\.svg(\?|#|$)/i.test(src)) return false
+    if (EXCLUDED_IMAGE_KEYWORDS.test(src)) return false
+    
+    const alt = (surface.alt || "").toLowerCase()
+    if (EXCLUDED_IMAGE_KEYWORDS.test(alt)) return false
+    if (EXCLUDED_IMAGE_KEYWORDS.test(getNodeTextForMatch(surface))) return false
+    if (hasExcludedKeywordAroundNode(surface)) return false
+    
+    if (isLikelyRoundAvatar(surface, rect) && !COMIC_IMAGE_HINT_KEYWORDS.test(src)) return false
+    
+    return true
+}
+
+// 等待图片加载完成（带超时）
+function waitForImageLoad(img, timeout = 5000) {
+    return new Promise((resolve) => {
+        if (img.complete && img.naturalWidth > 0) {
+            resolve(true)
+            return
+        }
+        
+        const timer = setTimeout(() => {
+            img.removeEventListener('load', onLoad)
+            img.removeEventListener('error', onError)
+            resolve(false)
+        }, timeout)
+        
+        const onLoad = () => {
+            clearTimeout(timer)
+            img.removeEventListener('load', onLoad)
+            img.removeEventListener('error', onError)
+            resolve(true)
+        }
+        
+        const onError = () => {
+            clearTimeout(timer)
+            img.removeEventListener('load', onLoad)
+            img.removeEventListener('error', onError)
+            resolve(false)
+        }
+        
+        img.addEventListener('load', onLoad)
+        img.addEventListener('error', onError)
+    })
+}
+
+// 持久监听器：等待图片加载完成后自动翻译
+// 使用 WeakMap 存储监听器标记，避免重复设置
+const delayedListenerSet = new WeakSet()
+function setupDelayedTranslateListener(img) {
+    if (!(img instanceof HTMLImageElement)) return
+    if (delayedListenerSet.has(img)) return  // 已经设置过
+    
+    delayedListenerSet.add(img)
+    
+    const onFinalLoad = () => {
+        img.removeEventListener('load', onFinalLoad)
+        img.removeEventListener('error', onFinalError)
+        
+        // 检查是否仍需翻译
+        if (!autoTranslateEnabled || translatedSurfaces.has(img)) return
+        if (!isTranslatableSurface(img)) return
+        
+        // 加入队列翻译
+        addToAutoTranslateQueue(img)
+    }
+    
+    const onFinalError = () => {
+        img.removeEventListener('load', onFinalLoad)
+        img.removeEventListener('error', onFinalError)
+        // 加载失败，从标记中移除（允许重试）
+        delayedListenerSet.delete(img)
+    }
+    
+    img.addEventListener('load', onFinalLoad)
+    img.addEventListener('error', onFinalError)
 }
 
 function getSurfaceHoverTarget(surface) {
@@ -600,18 +699,59 @@ async function init() {
   const surfaces = document.querySelectorAll("img, canvas")
   surfaces.forEach((surface) => createTranslateButton(surface))
 }
+// 为图片添加 load 事件监听，处理懒加载情况
+function setupImageLoadListener(img) {
+    if (!(img instanceof HTMLImageElement)) return
+    
+    // 已经加载完成且有内容
+    if (img.complete && img.naturalWidth > 0) {
+        // 直接检查是否需要翻译（可能之前漏掉了）
+        if (autoTranslateEnabled && isPotentiallyTranslatable(img) && !translatedSurfaces.has(img)) {
+            addToAutoTranslateQueue(img)
+        }
+        return
+    }
+    
+    // 未加载完成，设置监听器
+    const onLoad = () => {
+        img.removeEventListener('load', onLoad)
+        img.removeEventListener('error', onError)
+        // 图片加载完成后，重新检查是否需要翻译（使用宽松检查）
+        if (isPotentiallyTranslatable(img) && !translatedSurfaces.has(img)) {
+            createTranslateButton(img)
+            addToAutoTranslateQueue(img)
+        }
+    }
+    
+    const onError = () => {
+        img.removeEventListener('load', onLoad)
+        img.removeEventListener('error', onError)
+    }
+    
+    img.addEventListener('load', onLoad)
+    img.addEventListener('error', onError)
+}
+
 function handleAddedNode(node) {
     if (!(node instanceof Element)) return
 
     if (node instanceof HTMLImageElement || node instanceof HTMLCanvasElement) {
         createTranslateButton(node)
         addToAutoTranslateQueue(node)
+        // 为图片设置 load 监听
+        if (node instanceof HTMLImageElement) {
+            setupImageLoadListener(node)
+        }
     }
 
     const surfaces = node.querySelectorAll?.("img, canvas")
     surfaces?.forEach((surface) => {
         createTranslateButton(surface)
         addToAutoTranslateQueue(surface)
+        // 为图片设置 load 监听
+        if (surface instanceof HTMLImageElement) {
+            setupImageLoadListener(surface)
+        }
     })
 }
 
@@ -649,19 +789,107 @@ async function loadAutoTranslateState() {
     }
 }
 
+// 从后端获取翻译模式
+async function loadTranslateMode() {
+    try {
+        const response = await fetch(`${API_BASE}/conf/query`)
+        if (response.ok) {
+            const conf = await response.json()
+            translateMode = conf.translate_mode || "parallel"
+            console.log("翻译模式:", translateMode)
+        }
+    } catch (error) {
+        console.error("读取翻译模式失败:", error)
+    }
+}
+
 function startAutoTranslate() {
     autoTranslateQueue = []
+    sequentialContext = []  // 重置累积上下文
     const surfaces = document.querySelectorAll("img, canvas")
     surfaces.forEach((surface) => {
-        if (isTranslatableSurface(surface) && !translatedSurfaces.has(surface)) {
+        // 为图片设置 load 监听，处理懒加载
+        if (surface instanceof HTMLImageElement) {
+            setupImageLoadListener(surface)
+        }
+        // 使用 isPotentiallyTranslatable 检查，即使图片未加载也能加入队列
+        if (isPotentiallyTranslatable(surface) && !translatedSurfaces.has(surface)) {
             autoTranslateQueue.push(surface)
         }
     })
-    processAutoTranslateQueue()
+    
+    // 启动定期扫描，处理漏掉的图片
+    startPeriodicScan()
+    
+    // 根据翻译模式选择处理方式
+    if (translateMode === "context-batch") {
+        // 批量模式：延迟处理，等待懒加载图片
+        scheduleBatchProcess()
+    } else if (translateMode === "context-sequential") {
+        processSequentialTranslate()
+    } else {
+        processAutoTranslateQueue()
+    }
+}
+
+// 定期扫描未翻译的图片
+let periodicScanTimer = null
+const PERIODIC_SCAN_INTERVAL = 3000  // 3秒扫描一次
+
+function startPeriodicScan() {
+    if (periodicScanTimer) return
+    
+    periodicScanTimer = setInterval(() => {
+        if (!autoTranslateEnabled) {
+            stopPeriodicScan()
+            return
+        }
+        
+        // 扫描页面上所有图片
+        const surfaces = document.querySelectorAll("img, canvas")
+        let newFound = 0
+        
+        surfaces.forEach((surface) => {
+            // 跳过已翻译或已在队列中的
+            if (translatedSurfaces.has(surface)) return
+            if (autoTranslateQueue.includes(surface)) return
+            
+            // 检查是否可翻译（已加载完成）
+            if (surface instanceof HTMLImageElement) {
+                if (surface.complete && surface.naturalWidth > 0 && isTranslatableSurface(surface)) {
+                    autoTranslateQueue.push(surface)
+                    newFound++
+                }
+            } else if (isTranslatableSurface(surface)) {
+                autoTranslateQueue.push(surface)
+                newFound++
+            }
+        })
+        
+        // 如果发现新图片，触发处理
+        if (newFound > 0) {
+            console.log(`[定期扫描] 发现 ${newFound} 张新图片`)
+            if (translateMode === "context-batch") {
+                scheduleBatchProcess()
+            } else if (translateMode === "context-sequential") {
+                processSequentialTranslate()
+            } else {
+                processAutoTranslateQueue()
+            }
+        }
+    }, PERIODIC_SCAN_INTERVAL)
+}
+
+function stopPeriodicScan() {
+    if (periodicScanTimer) {
+        clearInterval(periodicScanTimer)
+        periodicScanTimer = null
+    }
 }
 
 function stopAutoTranslate() {
     autoTranslateQueue = []
+    stopPeriodicScan()
 }
 
 async function processAutoTranslateQueue() {
@@ -677,7 +905,18 @@ async function processAutoTranslateQueue() {
             continue
         }
 
-        if (!isTranslatableSurface(surface)) {
+        // 如果是图片，等待加载完成
+        if (surface instanceof HTMLImageElement) {
+            const loaded = await waitForImageLoad(surface, 5000)
+            if (!loaded) {
+                // 加载超时，设置持久监听器
+                setupDelayedTranslateListener(surface)
+                continue
+            }
+            if (!isTranslatableSurface(surface)) {
+                continue
+            }
+        } else if (!isTranslatableSurface(surface)) {
             continue
         }
 
@@ -697,16 +936,280 @@ async function processAutoTranslateQueue() {
     }
 
     isProcessingQueue = false
+    
+    // 检查是否有新图片加入队列，继续处理
+    if (autoTranslateQueue.length > 0 && autoTranslateEnabled) {
+        processAutoTranslateQueue()
+    }
+}
+
+// ============ 批量翻译模式（context-batch）============
+async function processBatchTranslate() {
+    if (isProcessingQueue || !autoTranslateEnabled) return
+    if (autoTranslateQueue.length === 0) return
+
+    isProcessingQueue = true
+    console.log(`[context-batch] 开始批量翻译 ${autoTranslateQueue.length} 张图片`)
+
+    // 收集所有待处理的图片（包括未加载的）
+    const pendingSurfaces = autoTranslateQueue.filter(surface => 
+        surface.isConnected && 
+        !translatedSurfaces.has(surface)
+    )
+    autoTranslateQueue = []
+
+    if (pendingSurfaces.length === 0) {
+        isProcessingQueue = false
+        return
+    }
+
+    // 按 DOM 位置排序
+    pendingSurfaces.sort((a, b) => {
+        const rectA = a.getBoundingClientRect()
+        const rectB = b.getBoundingClientRect()
+        if (Math.abs(rectA.top - rectB.top) > 50) {
+            return rectA.top - rectB.top
+        }
+        return rectA.left - rectB.left
+    })
+
+    // 等待所有图片加载完成
+    const validSurfaces = []
+    for (const surface of pendingSurfaces) {
+        if (surface instanceof HTMLImageElement) {
+            const loaded = await waitForImageLoad(surface, 5000)
+            if (loaded && isTranslatableSurface(surface)) {
+                validSurfaces.push(surface)
+            } else if (!loaded) {
+                // 加载超时，设置持久监听器
+                setupDelayedTranslateListener(surface)
+            }
+        } else if (isTranslatableSurface(surface)) {
+            validSurfaces.push(surface)
+        }
+    }
+
+    if (validSurfaces.length === 0) {
+        isProcessingQueue = false
+        return
+    }
+
+    try {
+        // 收集所有图片数据
+        const images = []
+        for (const surface of validSurfaces) {
+            const payload = await getTranslatePayload(surface)
+            images.push({
+                image_base64: payload.image_base64,
+                image_url: payload.image_url,
+            })
+        }
+
+        // 发送批量翻译请求
+        const batchUrl = `${API_BASE.replace(/\/+$/, "")}/api/v1/translate/batch`
+        const textDirection = verticalTextEnabled ? "vertical" : "horizontal"
+        
+        const response = await chrome.runtime.sendMessage({
+            type: "BATCH_TRANSLATE_REQUEST",
+            url: batchUrl,
+            payload: {
+                images,
+                referer: buildRefererBaseUrl(),
+                text_direction: textDirection,
+                enable_linebreak: aiLinebreakEnabled,
+            }
+        })
+
+        if (response.error) {
+            throw new Error(response.error)
+        }
+
+        const result = response.data
+
+        if (result?.status !== "success") {
+            throw new Error(result?.info || "批量翻译失败")
+        }
+
+        // 应用翻译结果
+        for (let i = 0; i < validSurfaces.length && i < result.results.length; i++) {
+            const surface = validSurfaces[i]
+            const itemResult = result.results[i]
+            
+            if (itemResult.res_img) {
+                const translatedDataUrl = "data:image/jpeg;base64," + itemResult.res_img
+                applyTranslatedResult(surface, translatedDataUrl)
+                translatedSurfaces.add(surface)
+                
+                if (autoSaveImageEnabled) {
+                    const sourceUrl = surface instanceof HTMLImageElement ? (surface.currentSrc || surface.src) : null
+                    downloadTranslatedImage(translatedDataUrl, sourceUrl)
+                }
+            }
+        }
+
+        console.log(`[context-batch] 批量翻译完成，耗时 ${result.duration}s`)
+
+    } catch (error) {
+        console.error("[context-batch] 批量翻译失败:", error)
+    }
+
+    isProcessingQueue = false
+    
+    // 检查是否有新图片加入队列，继续处理
+    if (autoTranslateQueue.length > 0 && autoTranslateEnabled) {
+        scheduleBatchProcess()
+    }
+}
+
+// ============ 顺序翻译模式（context-sequential）============
+async function processSequentialTranslate() {
+    if (isProcessingQueue || !autoTranslateEnabled) return
+    if (autoTranslateQueue.length === 0) return
+
+    isProcessingQueue = true
+    console.log(`[context-sequential] 开始顺序翻译，当前上下文: ${sequentialContext.length} 条`)
+
+    // 收集所有有效图片（包括未加载的）
+    const pendingSurfaces = autoTranslateQueue.filter(surface => 
+        surface.isConnected && 
+        !translatedSurfaces.has(surface)
+    )
+    autoTranslateQueue = []
+
+    if (pendingSurfaces.length === 0) {
+        isProcessingQueue = false
+        return
+    }
+
+    // 按 DOM 位置排序（从上到下，从左到右）
+    pendingSurfaces.sort((a, b) => {
+        const rectA = a.getBoundingClientRect()
+        const rectB = b.getBoundingClientRect()
+        // 先按 top 排序，相同则按 left 排序
+        if (Math.abs(rectA.top - rectB.top) > 50) {
+            return rectA.top - rectB.top
+        }
+        return rectA.left - rectB.left
+    })
+
+    for (const surface of pendingSurfaces) {
+        if (!autoTranslateEnabled) break
+        
+        // 如果是图片，等待加载完成
+        if (surface instanceof HTMLImageElement) {
+            const loaded = await waitForImageLoad(surface, 5000)
+            if (!loaded) {
+                // 加载超时，设置持久监听器，等加载完成后再翻译
+                console.log("[context-sequential] 图片加载超时，设置持久监听器")
+                setupDelayedTranslateListener(surface)
+                continue
+            }
+            if (!isTranslatableSurface(surface)) {
+                console.log("[context-sequential] 图片不可翻译，跳过")
+                continue
+            }
+        } else if (!isTranslatableSurface(surface)) {
+            continue
+        }
+        
+        try {
+            // 发送带上下文的翻译请求
+            const payload = await getTranslatePayload(surface)
+            const sequentialUrl = `${API_BASE.replace(/\/+$/, "")}/api/v1/translate/sequential`
+            const textDirection = verticalTextEnabled ? "vertical" : "horizontal"
+            
+            const response = await chrome.runtime.sendMessage({
+                type: "SEQUENTIAL_TRANSLATE_REQUEST",
+                url: sequentialUrl,
+                payload: {
+                    ...payload,
+                    previous_translations: sequentialContext.slice(-20),  // 只保留最近20条
+                    text_direction: textDirection,
+                    enable_linebreak: aiLinebreakEnabled,
+                }
+            })
+
+            if (response.error) {
+                throw new Error(response.error)
+            }
+
+            const result = response.data
+
+            if (result?.status !== "success") {
+                throw new Error(result?.info || "翻译失败")
+            }
+
+            const translatedDataUrl = "data:image/jpeg;base64," + result.res_img
+            applyTranslatedResult(surface, translatedDataUrl)
+            translatedSurfaces.add(surface)
+
+            // 累积上下文
+            if (result.cn_text && Array.isArray(result.cn_text)) {
+                sequentialContext.push(...result.cn_text)
+            }
+
+            if (autoSaveImageEnabled) {
+                const sourceUrl = surface instanceof HTMLImageElement ? (surface.currentSrc || surface.src) : null
+                downloadTranslatedImage(translatedDataUrl, sourceUrl)
+            }
+
+            console.log(`[context-sequential] 翻译完成，上下文累积: ${sequentialContext.length} 条`)
+
+        } catch (error) {
+            console.error("[context-sequential] 顺序翻译失败:", error)
+            // 失败时使用普通翻译，避免中断
+            try {
+                const result = await requestTranslation(surface)
+                const translatedDataUrl = "data:image/jpeg;base64," + result.res_img
+                applyTranslatedResult(surface, translatedDataUrl)
+                translatedSurfaces.add(surface)
+                if (result.cn_text && Array.isArray(result.cn_text)) {
+                    sequentialContext.push(...result.cn_text)
+                }
+            } catch (fallbackError) {
+                console.error("[context-sequential] 回退翻译也失败:", fallbackError)
+            }
+        }
+    }
+
+    isProcessingQueue = false
+    
+    // 检查是否有新图片加入队列，继续处理
+    if (autoTranslateQueue.length > 0 && autoTranslateEnabled) {
+        processSequentialTranslate()
+    }
 }
 
 function addToAutoTranslateQueue(surface) {
     if (!autoTranslateEnabled) return
-    if (!isTranslatableSurface(surface)) return
+    if (!isPotentiallyTranslatable(surface)) return  // 使用新检查函数
     if (translatedSurfaces.has(surface)) return
     if (autoTranslateQueue.includes(surface)) return
     
     autoTranslateQueue.push(surface)
-    processAutoTranslateQueue()
+    
+    // 根据当前翻译模式触发对应的处理函数
+    if (translateMode === "context-batch") {
+        // 批量模式：等待更多图片，稍后统一处理
+        scheduleBatchProcess()
+    } else if (translateMode === "context-sequential") {
+        processSequentialTranslate()
+    } else {
+        processAutoTranslateQueue()
+    }
+}
+
+// 批量翻译的延迟处理（等待更多图片加载）
+let batchProcessTimer = null
+function scheduleBatchProcess() {
+    if (batchProcessTimer) {
+        clearTimeout(batchProcessTimer)
+    }
+    // 等待 500ms 无新图片后再开始批量翻译
+    batchProcessTimer = setTimeout(() => {
+        batchProcessTimer = null
+        processBatchTranslate()
+    }, 500)
 }
 
 // 监听来自 popup 的消息
@@ -734,6 +1237,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         aiLinebreakEnabled = message.enabled
         console.log("AI智能断句已", message.enabled ? "启用" : "禁用")
     }
+    if (message.type === "TRANSLATE_MODE_UPDATED") {
+        translateMode = message.mode || "parallel"
+        sequentialContext = []  // 切换模式时重置上下文
+        console.log("翻译模式已切换为:", translateMode)
+    }
     if (message.type === "API_BASE_UPDATED") {
         API_BASE = message.apiBase || DEFAULT_API_BASE
         TRANSLATE_API_URL = `${API_BASE.replace(/\/+$/, "")}/api/v1/translate/web`
@@ -754,5 +1262,10 @@ const observer = new MutationObserver((mutations) => {
 
 observer.observe(document.body, { childList: true, subtree: true })
 
-init()
-loadAutoTranslateState()
+// 初始化顺序：先加载配置，再启动自动翻译
+async function initializeContent() {
+    init()
+    await loadTranslateMode()  // 先加载翻译模式
+    await loadAutoTranslateState()  // 再加载自动翻译状态（会根据 translateMode 选择处理方式）
+}
+initializeContent()

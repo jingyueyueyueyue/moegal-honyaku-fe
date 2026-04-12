@@ -2,7 +2,7 @@ const DEFAULT_API_BASE = "http://127.0.0.1:8000"
 const API_BASE_STORAGE_KEY = "api_base_url"
 const DEFAULT_OPTIONS = {
   translate_api_type: ["openai", "dashscope"],
-  translate_mode: ["parallel", "structured"],
+  translate_mode: ["parallel", "structured", "context", "context-batch", "context-sequential"],
   ocr_engine: ["local", "vision"],
   vision_ocr_provider: ["openai", "dashscope"],
 }
@@ -35,13 +35,19 @@ const PROVIDER_LABEL = {
 }
 
 const MODE_LABEL = {
-  parallel: "parallel",
-  structured: "structured",
+  parallel: "并行翻译",
+  structured: "结构化翻译",
+  context: "上下文感知",
+  "context-batch": "批量上下文",
+  "context-sequential": "顺序上下文",
 }
 
 const MODE_DESC = {
-  parallel: "parallel：速度更稳定，逐句并发请求，适合长文本分段翻译。",
-  structured: "structured：一次请求完成整组翻译，适合需要统一上下文的场景。",
+  parallel: "【并行翻译】每句独立并发请求，速度快，适合简单对话。",
+  structured: "【结构化翻译】一次请求完成整组翻译，保持术语一致性。",
+  context: "【上下文感知】结合上下文理解代词、省略句和语气，保持叙事连贯性（单图片内）。",
+  "context-batch": "【批量上下文】等待所有图片加载后一次性翻译，跨图片保持上下文连贯，适合整话阅读。",
+  "context-sequential": "【顺序上下文】按顺序逐图翻译，累积上下文信息，适合边滚动边阅读。",
 }
 
 const state = {
@@ -1622,6 +1628,27 @@ async function onConfigChange(attr, value) {
     persistCurrentConfig()
     view.lastSync.textContent = now()
     setStatus("保存成功", "is-ok")
+    
+    // 如果是翻译模式变更，通知所有 content scripts
+    if (attr === "translate_mode") {
+      try {
+        const tabs = await chrome.tabs.query({})
+        for (const tab of tabs) {
+          if (tab.id) {
+            try {
+              await chrome.tabs.sendMessage(tab.id, {
+                type: "TRANSLATE_MODE_UPDATED",
+                mode: value
+              })
+            } catch (e) {
+              // 忽略无法发送的标签页
+            }
+          }
+        }
+      } catch (e) {
+        console.error("通知翻译模式变更失败:", e)
+      }
+    }
   } catch (error) {
     console.error("配置更新失败:", error)
     if (attr === "translate_api_type") {
