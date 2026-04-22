@@ -557,6 +557,14 @@ body.has-custom-bg .toggle-card {
   display: none;
 }
 
+.local-ocr-config-section {
+  margin-top: 10px;
+}
+
+.local-ocr-config-section[hidden] {
+  display: none;
+}
+
 .config-actions {
   margin-top: 10px;
   display: flex;

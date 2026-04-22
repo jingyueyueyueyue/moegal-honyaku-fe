@@ -82,6 +82,19 @@
           <option value="vision">Vision (多模态)</option>
         </select>
       </label>
+      <div class="local-ocr-config-section" id="local-ocr-config-section">
+        <label class="field" for="local-ocr-engine-select">
+          <span class="field-label">本地 OCR 模型</span>
+          <select class="field-input" id="local-ocr-engine-select">
+            <option value="auto">自动选择</option>
+            <option value="manga_ocr">MangaOCR (日文)</option>
+            <option value="paddle_ocr">PaddleOCR (多语言)</option>
+            <option value="model_48px">48px OCR (高精度)</option>
+            <option value="model_48px_ctc">48px CTC OCR</option>
+          </select>
+        </label>
+        <p class="config-tip" id="local-ocr-tip">MangaOCR 适合日文；PaddleOCR 支持多语言；48px 系列来自 manga-image-translator。</p>
+      </div>
       <div class="vision-config-section" id="vision-config-section">
         <label class="field" for="vision-provider-select">
           <span class="field-label">Vision 供应商</span>
@@ -187,6 +200,47 @@
           <input type="checkbox" id="ai-linebreak-toggle">
           <span class="toggle-slider"></span>
         </label>
+      </div>
+    </section>
+
+    <!-- Inpainting 配置 -->
+    <section class="form-card inpainting-config-card">
+      <div class="config-header">
+        <span class="config-title">Inpainting 配置</span>
+      </div>
+      <p class="config-tip" id="inpainting-tip">Inpainting 用于去除原文文字并填补背景。</p>
+      <label class="field" for="inpaint-method-select">
+        <span class="field-label">Inpainting 方法</span>
+        <select class="field-input" id="inpaint-method-select">
+          <option value="aot">AOT (推荐，效果最好)</option>
+          <option value="telea">Telea (快速)</option>
+          <option value="ns">Navier-Stokes (质量更好)</option>
+          <option value="lama">Lama-MPE (深度学习)</option>
+          <option value="lama_large">Lama-Large (更准确)</option>
+        </select>
+      </label>
+      <div class="toggle-item">
+        <div class="toggle-info">
+          <span class="toggle-label">CRF 掩码细化</span>
+          <span class="toggle-desc">优化掩码边界，减少涂抹痕迹</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="crf-refine-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="toggle-item">
+        <div class="toggle-info">
+          <span class="toggle-label">合并文本框</span>
+          <span class="toggle-desc">合并同一气泡内的多行文本一起翻译</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="merge-textboxes-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="config-actions">
+        <button type="button" id="save-inpainting-config-btn" class="ghost-btn">保存配置</button>
       </div>
     </section>
 

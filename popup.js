@@ -10,6 +10,9 @@ const AUTO_SAVE_IMAGE_KEY = "auto_save_image_enabled"
 const BASE64_UPLOAD_KEY = "base64_upload_enabled"
 const VERTICAL_TEXT_KEY = "vertical_text_enabled"
 const AI_LINEBREAK_KEY = "ai_linebreak_enabled"
+const INPAINT_METHOD_KEY = "inpaint_method"
+const CRF_REFINE_KEY = "crf_refine_enabled"
+const MERGE_TEXTBOXES_KEY = "merge_textboxes_enabled"
 
 // 配置本地缓存 key
 const TRANSLATE_CONFIG_CACHE_KEY = "translate_config_cache"
@@ -19,6 +22,88 @@ const OCR_CONFIG_CACHE_KEY = "ocr_config_cache"
 const DEFAULT_BASE_URLS = {
   openai: "https://api.openai.com/v1",
   dashscope: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+}
+
+const LEGACY_INPAINT_METHOD_MAP = {
+  fast: "fast",
+  quality: "quality",
+  telea: "fast",
+  ns: "fast",
+  aot: "fast",
+  lama: "quality",
+  lama_mpe: "quality",
+  lama_large: "quality",
+}
+
+const INPAINT_METHOD_UI_OPTIONS = [
+  { value: "quality", label: "高质量慢速（Lama Large）" },
+  { value: "fast", label: "快速模式（旧版）" },
+]
+
+const INPAINT_METHOD_DESC = {
+  quality: "高质量模式优先背景自然度，速度较慢。",
+  fast: "快速模式走旧版快速链路，只追求速度。",
+}
+
+function normalizeInpaintMethod(value) {
+  if (typeof value !== "string") return "quality"
+  return LEGACY_INPAINT_METHOD_MAP[value.trim().toLowerCase()] || "quality"
+}
+
+function applyInpaintingConfigState(method, mergeTextboxes) {
+  const normalizedMethod = normalizeInpaintMethod(method)
+  const normalizedMergeTextboxes = mergeTextboxes !== false
+  const derivedCrfRefine = normalizedMethod === "quality"
+
+  if (view.inpaintMethodSelect) {
+    view.inpaintMethodSelect.value = normalizedMethod
+  }
+  if (view.crfRefineToggle) {
+    view.crfRefineToggle.checked = derivedCrfRefine
+    view.crfRefineToggle.disabled = true
+  }
+  if (view.mergeTextboxesToggle) {
+    view.mergeTextboxesToggle.checked = normalizedMergeTextboxes
+  }
+
+  state.inpaintingConfig.inpaintMethod = normalizedMethod
+  state.inpaintingConfig.useCrfRefine = derivedCrfRefine
+  state.inpaintingConfig.mergeTextboxes = normalizedMergeTextboxes
+  updateInpaintingTip(normalizedMethod)
+
+  return {
+    method: normalizedMethod,
+    crfRefine: derivedCrfRefine,
+    mergeTextboxes: normalizedMergeTextboxes,
+  }
+}
+
+function setupInpaintingUi() {
+  if (view.inpaintMethodSelect) {
+    view.inpaintMethodSelect.innerHTML = ""
+    INPAINT_METHOD_UI_OPTIONS.forEach(({ value, label }) => {
+      const option = document.createElement("option")
+      option.value = value
+      option.textContent = label
+      view.inpaintMethodSelect.appendChild(option)
+    })
+  }
+
+  if (view.crfRefineToggle) {
+    const toggleRow = view.crfRefineToggle.closest(".toggle-item")
+    if (toggleRow) {
+      toggleRow.hidden = true
+    } else {
+      view.crfRefineToggle.hidden = true
+    }
+  }
+}
+
+function updateInpaintingTip(method) {
+  if (!view.inpaintingTip) return
+  const normalizedMethod = normalizeInpaintMethod(method)
+  const desc = INPAINT_METHOD_DESC[normalizedMethod] || INPAINT_METHOD_DESC.quality
+  setInpaintingTip(desc, "")
 }
 
 let API_BASE = DEFAULT_API_BASE
@@ -89,11 +174,18 @@ const state = {
   // OCR/Vision 配置状态
   ocrConfig: {
     engine: "local",
+    localOcrEngine: "auto",
     provider: "openai",
     apiKey: "",
     baseUrl: "",
     model: "",
     models: [],
+  },
+  // Inpainting 配置状态
+  inpaintingConfig: {
+    inpaintMethod: "quality",
+    useCrfRefine: true,
+    mergeTextboxes: true,
   },
 }
 
@@ -138,7 +230,16 @@ const view = {
   saveTranslateConfigBtn: null,
   // OCR/Vision 配置
   ocrEngineSelect: null,
+  localOcrConfigSection: null,
+  localOcrEngineSelect: null,
+  localOcrTip: null,
   visionConfigSection: null,
+  // Inpainting 配置
+  inpaintMethodSelect: null,
+  crfRefineToggle: null,
+  mergeTextboxesToggle: null,
+  inpaintingTip: null,
+  saveInpaintingConfigBtn: null,
   visionProviderSelect: null,
   visionApiKeyInput: null,
   visionBaseUrlInput: null,
@@ -448,6 +549,62 @@ async function saveAiLinebreakState(enabled) {
   }
 }
 
+// ========== Inpainting 配置管理 ==========
+
+async function loadInpaintingState() {
+  try {
+    const result = await chrome.storage.local.get([INPAINT_METHOD_KEY, CRF_REFINE_KEY, MERGE_TEXTBOXES_KEY])
+    const mergeTextboxes = result[MERGE_TEXTBOXES_KEY] !== false  // 默认 true
+    applyInpaintingConfigState(result[INPAINT_METHOD_KEY] || "quality", mergeTextboxes)
+  } catch (error) {
+    console.error("读取Inpainting配置失败:", error)
+    applyInpaintingConfigState("quality", true)
+  }
+}
+
+async function saveInpaintingState(method, crfRefine, mergeTextboxes) {
+  try {
+    await chrome.storage.local.set({
+      [INPAINT_METHOD_KEY]: method,
+      [CRF_REFINE_KEY]: crfRefine,
+      [MERGE_TEXTBOXES_KEY]: mergeTextboxes,
+    })
+  } catch (error) {
+    console.error("保存Inpainting配置失败:", error)
+  }
+}
+
+function setInpaintingTip(text, type) {
+  view.inpaintingTip.textContent = text || ""
+  view.inpaintingTip.className = `config-tip ${type ? `is-${type}` : ""}`
+}
+
+async function onInpaintingConfigSave() {
+  const { method, crfRefine, mergeTextboxes } = applyInpaintingConfigState(
+    view.inpaintMethodSelect.value,
+    view.mergeTextboxesToggle.checked,
+  )
+
+  setInpaintingTip("保存中...", "")
+
+  try {
+    // 保存到本地存储
+    await saveInpaintingState(method, crfRefine, mergeTextboxes)
+    
+    // 同步到服务器
+    await batchUpdateConf({
+      inpaint_method: method,
+      use_crf_refine: crfRefine,
+      merge_textboxes: mergeTextboxes,
+    })
+
+    setInpaintingTip("保存成功", "success")
+  } catch (error) {
+    console.error("保存Inpainting配置失败:", error)
+    setInpaintingTip(error.message, "error")
+  }
+}
+
 async function onAutoTranslateChange(event) {
   const enabled = event.target.checked
   await saveAutoTranslateState(enabled)
@@ -722,6 +879,7 @@ function renderVisionModels(models, selectedModel) {
 function updateVisionConfigVisibility() {
   const engine = view.ocrEngineSelect.value
   view.visionConfigSection.hidden = engine !== "vision"
+  view.localOcrConfigSection.hidden = engine !== "local"
   state.ocrConfig.engine = engine
 }
 
@@ -799,6 +957,7 @@ async function onVisionConfigSave() {
   const apiKey = view.visionApiKeyInput.value.trim()
   const baseUrl = view.visionBaseUrlInput.value.trim()
   const model = view.visionModelSelect.value
+  const localOcrEngine = view.localOcrEngineSelect.value
 
   state.ocrConfig.engine = engine
   state.ocrConfig.provider = provider
@@ -818,6 +977,9 @@ async function onVisionConfigSave() {
       if (apiKey) config[`vision_${provider}_api_key`] = apiKey
       if (baseUrl) config[`vision_${provider}_base_url`] = baseUrl
       if (model) config[`vision_${provider}_model`] = model
+    } else if (engine === "local") {
+      // 本地 OCR 配置
+      config.local_ocr_engine = localOcrEngine
     }
 
     await batchUpdateConf(config)
@@ -859,6 +1021,10 @@ function loadConfigToUI(conf) {
   view.ocrEngineSelect.value = ocrEngine
   updateVisionConfigVisibility()
 
+  // 本地 OCR 配置
+  const localOcrEngine = conf.local_ocr_engine || "auto"
+  view.localOcrEngineSelect.value = localOcrEngine
+
   if (ocrEngine === "vision") {
     const visionProvider = conf.vision_ocr_provider || "openai"
     view.visionProviderSelect.value = visionProvider
@@ -893,6 +1059,10 @@ function loadConfigToUI(conf) {
       models: [],
     }
   }
+
+  // Inpainting 配置
+  const mergeTextboxes = conf.merge_textboxes !== false  // 默认 true
+  applyInpaintingConfigState(conf.inpaint_method || "quality", mergeTextboxes)
 }
 
 // 密码可见性切换
@@ -976,6 +1146,7 @@ function saveOcrConfigCache() {
   try {
     const config = {
       engine: view.ocrEngineSelect.value,
+      localOcrEngine: view.localOcrEngineSelect.value,
       provider: view.visionProviderSelect.value,
       apiKey: view.visionApiKeyInput.value.trim(),
       baseUrl: view.visionBaseUrlInput.value.trim(),
@@ -997,6 +1168,9 @@ function restoreOcrConfigCache() {
     if (config.engine) {
       view.ocrEngineSelect.value = config.engine
       updateVisionConfigVisibility()
+    }
+    if (config.localOcrEngine) {
+      view.localOcrEngineSelect.value = config.localOcrEngine
     }
     if (config.provider) {
       view.visionProviderSelect.value = config.provider
@@ -1020,6 +1194,7 @@ function restoreOcrConfigCache() {
 
     // 更新状态
     state.ocrConfig.engine = config.engine || "local"
+    state.ocrConfig.localOcrEngine = config.localOcrEngine || "auto"
     state.ocrConfig.provider = config.provider || "openai"
     state.ocrConfig.apiKey = config.apiKey || ""
     state.ocrConfig.baseUrl = config.baseUrl || ""
@@ -1727,6 +1902,10 @@ function bindEvents() {
     onOcrEngineChange()
     saveOcrConfigCache()
   })
+  view.localOcrEngineSelect.addEventListener("change", () => {
+    state.ocrConfig.localOcrEngine = view.localOcrEngineSelect.value
+    saveOcrConfigCache()
+  })
   view.visionProviderSelect.addEventListener("change", () => {
     onVisionProviderChange()
     saveOcrConfigCache()
@@ -1750,6 +1929,13 @@ function bindEvents() {
     saveOcrConfigCache()
   })
   view.saveVisionConfigBtn.addEventListener("click", onVisionConfigSave)
+
+  // Inpainting 配置事件
+  view.inpaintMethodSelect.addEventListener("change", (event) => {
+    const { method } = applyInpaintingConfigState(event.target.value, view.mergeTextboxesToggle.checked)
+    event.target.value = method
+  })
+  view.saveInpaintingConfigBtn.addEventListener("click", onInpaintingConfigSave)
 
   // 密码可见性切换
   document.querySelectorAll(".toggle-visibility-btn").forEach(btn => {
@@ -1800,6 +1986,9 @@ async function init() {
 
   // OCR/Vision 配置元素
   view.ocrEngineSelect = document.getElementById("ocr-engine-select")
+  view.localOcrConfigSection = document.getElementById("local-ocr-config-section")
+  view.localOcrEngineSelect = document.getElementById("local-ocr-engine-select")
+  view.localOcrTip = document.getElementById("local-ocr-tip")
   view.visionConfigSection = document.getElementById("vision-config-section")
   view.visionProviderSelect = document.getElementById("vision-provider-select")
   view.visionApiKeyInput = document.getElementById("vision-api-key-input")
@@ -1811,6 +2000,15 @@ async function init() {
   view.visionCustomModelInput = document.getElementById("vision-custom-model-input")
   view.visionConfigTip = document.getElementById("vision-config-tip")
   view.saveVisionConfigBtn = document.getElementById("save-vision-config-btn")
+
+  // Inpainting 配置元素
+  view.inpaintMethodSelect = document.getElementById("inpaint-method-select")
+  view.crfRefineToggle = document.getElementById("crf-refine-toggle")
+  view.mergeTextboxesToggle = document.getElementById("merge-textboxes-toggle")
+  view.inpaintingTip = document.getElementById("inpainting-tip")
+  view.saveInpaintingConfigBtn = document.getElementById("save-inpainting-config-btn")
+
+  setupInpaintingUi()
 
   resetCropperState()
   hydrateCachedConfig()
@@ -1826,6 +2024,7 @@ async function init() {
   loadBase64UploadState()
   loadVerticalTextState()
   loadAiLinebreakState()
+  loadInpaintingState()
   await loadApiBase()
 
   bindEvents()
