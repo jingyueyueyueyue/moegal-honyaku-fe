@@ -1,3 +1,8 @@
+.moegal-translate-button-group {
+    gap: 6px;
+    align-items: center;
+}
+
 .translate-btn {
     background-color: rgb(0, 150, 250);
     color: rgb(255, 255, 255);
@@ -10,9 +15,17 @@
     transition: 0.2s;
 }
 
+.translate-once-btn {
+    background-color: rgb(255, 96, 0);
+}
+
 .translate-btn:hover {
     background-color: rgb(0, 120, 220);
     transition: 0.2s;
+}
+
+.translate-once-btn:hover {
+    background-color: rgb(225, 78, 0);
 }
 
 .moegal-translate-overlay {

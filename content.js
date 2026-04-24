@@ -693,19 +693,32 @@ function createTranslateButton(surface) {
     const hoverTarget = getSurfaceHoverTarget(surface)
     if (!(hoverTarget instanceof Element)) return
 
+    const buttonGroup = document.createElement("div")
+    buttonGroup.className = "moegal-translate-button-group"
+    buttonGroup.style.position = "absolute"
+    buttonGroup.style.zIndex = 9999
+    buttonGroup.style.display = "none"
+
     const button = document.createElement("button")
     button.type = "button"
     button.textContent = "翻译图片"
     button.className = "translate-btn"
-    button.style.position = "absolute"
-    button.style.zIndex = 9999
-    button.style.display = "none"
-    document.body.appendChild(button)
+
+    const onceButton = document.createElement("button")
+    onceButton.type = "button"
+    onceButton.textContent = "一键翻译"
+    onceButton.className = "translate-btn translate-once-btn"
+
+    buttonGroup.appendChild(button)
+    buttonGroup.appendChild(onceButton)
+    document.body.appendChild(buttonGroup)
 
     const state = {
         surface,
         hoverTarget,
+        buttonGroup,
         button,
+        onceButton,
         hideTimeout: 0,
         resetTimeout: 0,
     }
@@ -714,32 +727,32 @@ function createTranslateButton(surface) {
 
     const updateButtonPosition = () => {
         const rect = getSurfaceRect(surface)
-        button.style.top = `${rect.top + window.scrollY + 3}px`
-        button.style.left = `${rect.left + window.scrollX + 3}px`
+        buttonGroup.style.top = `${rect.top + window.scrollY + 3}px`
+        buttonGroup.style.left = `${rect.left + window.scrollX + 3}px`
     }
 
     const showButton = () => {
         clearHideTimer(state)
         if (!surface.isConnected || !isTranslatableSurface(surface)) {
-            button.style.display = "none"
+            buttonGroup.style.display = "none"
             return
         }
         updateButtonPosition()
-        button.style.display = "block"
+        buttonGroup.style.display = "flex"
     }
 
     const hideButtonWithDelay = () => {
         clearHideTimer(state)
         state.hideTimeout = setTimeout(() => {
-            button.style.display = "none"
+            buttonGroup.style.display = "none"
             state.hideTimeout = 0
         }, BUTTON_HIDE_DELAY)
     }
 
     hoverTarget.addEventListener("mouseenter", showButton)
     hoverTarget.addEventListener("mouseleave", hideButtonWithDelay)
-    button.addEventListener("mouseenter", showButton)
-    button.addEventListener("mouseleave", hideButtonWithDelay)
+    buttonGroup.addEventListener("mouseenter", showButton)
+    buttonGroup.addEventListener("mouseleave", hideButtonWithDelay)
     button.addEventListener("click", async (event) => {
         event.preventDefault()
         event.stopPropagation()
@@ -780,6 +793,16 @@ function createTranslateButton(surface) {
         }
 
         scheduleButtonReset(state)
+    })
+    onceButton.addEventListener("click", (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        const queued = queueCurrentPageForOneShotTranslate()
+        if (queued > 0) {
+            setButtonMessage(state, `已加入 ${queued} 张`, 1400)
+        } else {
+            setButtonMessage(state, "没有可翻译图片", 1400)
+        }
     })
 }
 
@@ -979,6 +1002,58 @@ function stopPeriodicScan() {
 function stopAutoTranslate() {
     autoTranslateQueue = []
     stopPeriodicScan()
+}
+
+async function processOneShotTranslateQueue(queue) {
+    for (const surface of queue) {
+        if (!surface.isConnected || translatedSurfaces.has(surface)) {
+            continue
+        }
+
+        if (surface instanceof HTMLImageElement) {
+            const loaded = await waitForImageLoad(surface, 5000)
+            if (!loaded || !isTranslatableSurface(surface)) {
+                continue
+            }
+        } else if (!isTranslatableSurface(surface)) {
+            continue
+        }
+
+        try {
+            const result = await requestTranslation(surface)
+            const translatedDataUrl = "data:image/jpeg;base64," + result.res_img
+            applyTranslatedResult(surface, translatedDataUrl)
+            translatedSurfaces.add(surface)
+            if (autoSaveImageEnabled) {
+                const sourceUrl = surface instanceof HTMLImageElement ? (surface.currentSrc || surface.src) : null
+                downloadTranslatedImage(translatedDataUrl, sourceUrl)
+            }
+        } catch (error) {
+            console.error("One-shot translate failed:", error)
+        }
+    }
+}
+
+function queueCurrentPageForOneShotTranslate() {
+    const surfaces = document.querySelectorAll("img, canvas")
+    const oneShotQueue = []
+    let queuedCount = 0
+
+    surfaces.forEach((surface) => {
+        if (surface instanceof HTMLImageElement) {
+            setupImageLoadListener(surface)
+        }
+        if (isPotentiallyTranslatable(surface) && !translatedSurfaces.has(surface) && !oneShotQueue.includes(surface)) {
+            oneShotQueue.push(surface)
+            queuedCount++
+        }
+    })
+
+    if (queuedCount > 0) {
+        processOneShotTranslateQueue(oneShotQueue)
+    }
+
+    return queuedCount
 }
 
 async function processAutoTranslateQueue() {
